@@ -1,0 +1,52 @@
+name: 週次レポート
+
+on:
+  schedule:
+    # 毎週月曜 7:30 JST (= 日曜 22:30 UTC)。前の週 (月〜日) の記録を分析する
+    - cron: "30 22 * * 0"
+    # 予備: 月曜 8:30 JST。定期実行はまれに丸ごと飛ばされるため。作成済みなら何もしない
+    - cron: "30 23 * * 0"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "作成済みでも作り直す"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # claude setup-token で作ったトークン。Claude の契約の範囲で動く
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      APP_URL: ${{ vars.APP_URL }}
+      INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Claude Code をインストール
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s stable
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: トークンの確認
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "Secret CLAUDE_CODE_OAUTH_TOKEN が空です。claude setup-token で作ったトークンを登録してください"; exit 1
+          fi
+          claude --version
+      - name: レポートを作る
+        run: python generator/main.py weekly ${{ inputs.force && '--force' || '' }}

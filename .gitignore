@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+out/
+.wrangler/
+node_modules/
+.claude/
+.secrets/
+skin-log-*.json

@@ -1,0 +1,20 @@
+# Cloudflare Pages の設定 (デプロイは .github/workflows/deploy.yml が行う)
+name = "skin-log"
+pages_build_output_dir = "web"
+compatibility_date = "2026-09-01"
+
+[vars]
+# scripts/gen_vapid.py で作った公開鍵 (公開してよい値)
+VAPID_PUBLIC_KEY = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skin-log"
+# Cloudflare で D1 を作成したら、その Database ID を貼る (README の手順2)
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# 顔写真の保存先 (deploy.yml が初回に作成する)
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "skin-log-photos"
