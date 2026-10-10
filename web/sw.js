@@ -1,5 +1,5 @@
-const CACHE = "skin-v4";
-const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg"];
+const CACHE = "skin-v5";
+const SHELL = ["./", "index.html", "app.js", "products.js", "style.css", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));

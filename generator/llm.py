@@ -1,4 +1,4 @@
-"""Claude の呼び出し (週次レポートの文章)。
+"""Claude の呼び出し (週次レポートの文章、化粧品の成分の調査)。
 
 Claude Code の CLI (claude -p) を使う。GitHub Actions では CLAUDE_CODE_OAUTH_TOKEN
 (claude setup-token で作ったトークン) で認証し、Claude の契約の範囲で動く。
@@ -19,12 +19,24 @@ SYSTEM = ("あなたは皮膚の健康に詳しいアシスタントです。利
           "肌の悪化要因の仮説と、日常生活で試せる対策を日本語で提案します。医師ではないので診断はしません。")
 
 
-def _claude(prompt, schema, effort="high", files=None):
+def _tool_result_text(block):
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(c.get("text", "") for c in content if isinstance(c, dict))
+    return ""
+
+
+def _claude(prompt, schema, effort="high", files=None, tools=None, max_turns=None, with_tool_texts=False, system=SYSTEM):
     """claude -p を実行し、JSON Schema に沿った結果を返す。
 
     files ({ファイル名: bytes}) を渡すと作業フォルダに置き、Read ツールでだけ読めるようにする (顔写真用)。
+    tools にツール名 (例: "WebSearch,WebFetch") を渡すとそれだけ使わせる。
+    with_tool_texts=True なら (結果, ツール結果のテキスト一覧) を返す (検索結果に出た URL か確かめる用)。
     """
-    tools = "Read" if files else ""
+    if tools is None:
+        tools = "Read" if files else ""
     exe = shutil.which("claude")
     if not exe:
         raise RuntimeError("claude コマンドが見つかりません。Claude Code をインストールしてください")
@@ -33,10 +45,10 @@ def _claude(prompt, schema, effort="high", files=None):
         "--output-format", "stream-json", "--verbose",
         "--json-schema", json.dumps(schema, ensure_ascii=False),
         "--model", MODEL, "--fallback-model", FALLBACK_MODEL, "--effort", effort,
-        "--system-prompt", SYSTEM,
+        "--system-prompt", system,
         "--tools", tools,
         "--permission-mode", "dontAsk", "--permission-prompts", "none",
-        "--max-turns", "6" if files else "3",
+        "--max-turns", str(max_turns or (6 if files else 3)),
         "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config",
     ]
     if tools:
@@ -47,13 +59,17 @@ def _claude(prompt, schema, effort="high", files=None):
             (pathlib.Path(cwd) / name).write_bytes(data)
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                               encoding="utf-8", cwd=cwd, timeout=900)
-    result = None
+    result, tool_texts = None, []
     for line in proc.stdout.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if event.get("type") == "result":
+        if event.get("type") == "user":
+            for block in event.get("message", {}).get("content", []):
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    tool_texts.append(_tool_result_text(block))
+        elif event.get("type") == "result":
             result = event
     if result is None:
         raise RuntimeError(f"claude が結果を返しませんでした (exit {proc.returncode}): {proc.stderr[-2000:]}")
@@ -63,7 +79,109 @@ def _claude(prompt, schema, effort="high", files=None):
     output = result.get("structured_output")
     if output is None:
         output = json.loads(result.get("result") or "null")
+    return (output, tool_texts) if with_tool_texts else output
+
+
+# ---------- 化粧品・日用品の成分 ----------
+
+FLAG_TYPES = ["刺激", "ニキビ", "かぶれ", "乾燥"]
+
+PRODUCT_SYSTEM = ("あなたは化粧品の成分に詳しいアシスタントです。製品の全成分表示を、実際に確認できた情報だけから"
+                  "正確に書き写し、肌トラブルのきっかけになりやすい成分を日本語で説明します。推測で成分を補いません。")
+
+PRODUCT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "found": {"type": "boolean"},
+        "matched_name": {"type": "string"},
+        "ingredients": {"type": "array", "items": {"type": "string"}},
+        "source_urls": {"type": "array", "items": {"type": "string"}},
+        "flags": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "ingredient": {"type": "string"},
+                "type": {"type": "string", "enum": FLAG_TYPES},
+                "reason": {"type": "string"},
+            },
+            "required": ["ingredient", "type", "reason"], "additionalProperties": False}},
+        "summary": {"type": "string"},
+        "note": {"type": "string"},
+    },
+    "required": ["found", "matched_name", "ingredients", "source_urls", "flags", "summary", "note"],
+    "additionalProperties": False,
+}
+
+FLAG_RULES = """## 成分チェック (flags と summary)
+- flags: 肌トラブルのきっかけになりやすい成分だけを挙げる (多くても8個)。成分名は ingredients の表記そのままにする。
+  - 刺激: エタノール (成分表の前の方にあるとき)、香料、メントール、精油・植物エキスの一部、高濃度の酸 (AHA/BHA)、レチノールなど
+  - ニキビ: 毛穴を詰まらせやすいとされる油分 (ココナッツ油、ミリスチン酸イソプロピルなど)
+  - かぶれ: かぶれ (接触皮膚炎) の原因として知られる成分 (一部の防腐剤、香料成分、染料など)
+  - 乾燥: 脱脂力の強い洗浄成分 (ラウリル硫酸Na など)
+  - 一般的な保湿成分や、配合量がごく少ないと考えられる成分 (成分表の後ろの方) は、理由がない限り挙げない。
+  - reason は「なぜ注意か」を25字以内で。怖がらせる書き方はしない。
+- summary: この製品の特徴を1〜2文で (例:「アルコールと香料が入った、さっぱりタイプの化粧水です」)。
+  多くの人には問題なく使える成分でも、人によって合わないことがある、という前提で書く。"""
+
+
+def lookup_product(product):
+    """商品名から Web で全成分を調べ、成分チェックもする。
+
+    出典 URL は、検索・取得ツールの結果に実際に出てきたものだけを残す。
+    """
+    prompt = f"""次の製品の「全成分表示」を Web で調べてください。
+
+製品: {product['name']}
+種類: {product['category']}
+
+## 調べ方
+- WebSearch で「{product['name']} 全成分」などと検索し、WebFetch で成分が載っているページを開いて確かめる。
+- 信頼できる順: メーカー公式サイト > 大手通販・ドラッグストアの商品ページ > 化粧品の口コミサイト。
+  個人ブログやまとめ記事だけを根拠にしない。
+- 同じシリーズの別商品 (しっとり/さっぱり、詰め替え用、旧パッケージ、医薬部外品の有効成分のみの表示など) と
+  取り違えないこと。商品名が完全に一致しない場合は matched_name に実際に見つかった商品名を書き、note に違いを書く。
+- 2つ以上のページで成分が一致すれば確実。リニューアルで成分が変わっている場合は新しい方を使い、note に書く。
+
+## 出力
+- found: 全成分を確認できたときだけ true。見つからない・自信がないときは false にし、ingredients は空、
+  note に理由と、利用者がパッケージの成分表示を貼り付けるとよいことを書く。
+- ingredients: 全成分表示の順番どおり、表示の名前のまま (日本語)。自分で補ったり推測したりしない。
+  医薬部外品で「有効成分」「その他の成分」に分かれている場合は、有効成分を先に並べる。
+- source_urls: 成分を確認したページの URL (ツールの結果に出てきたものだけ)。
+- matched_name: 見つかった商品の正式な名前。
+
+{FLAG_RULES}
+"""
+    output, tool_texts = _claude(prompt, PRODUCT_SCHEMA, effort="medium", tools="WebSearch,WebFetch",
+                                 max_turns=15, with_tool_texts=True, system=PRODUCT_SYSTEM)
+    seen = "\n".join(tool_texts)
+    output["source_urls"] = [u for u in output["source_urls"]
+                             if u.startswith("http") and (not seen or u in seen or u.rstrip("/") in seen)]
+    if output["found"] and not output["source_urls"]:
+        print("  出典を確認できないので見つからなかった扱いにします")
+        output.update(found=False, ingredients=[], flags=[],
+                      note=(output["note"] + " 出典のページを確認できませんでした。").strip())
     return output
+
+
+def check_ingredients(product):
+    """利用者が貼り付けた成分表示で、成分チェックだけをする (Web は使わない)。"""
+    prompt = f"""次の製品の全成分表示を見て、成分チェックをしてください。
+
+製品: {product['name']}
+種類: {product['category']}
+全成分 (利用者がパッケージから書き写したもの):
+{product['ingredients_text']}
+
+## 出力
+- found: true
+- matched_name: 製品名をそのまま
+- ingredients: 成分を表示の順番どおりに1つずつ分けたもの (誤字は直さず、区切りだけ整える)
+- source_urls: 空
+- note: 書き写しに明らかな誤りや抜けがありそうなら書く。なければ空文字
+
+{FLAG_RULES}
+"""
+    return _claude(prompt, PRODUCT_SCHEMA, effort="medium", system=PRODUCT_SYSTEM)
 
 
 REPORT_SCHEMA = {
@@ -92,8 +210,13 @@ REPORT_SCHEMA = {
             "required": ["action", "how_to_check"], "additionalProperties": False},
         "see_doctor": {"type": "string"},
         "photo_note": {"type": "string"},
+        "ingredient_findings": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"finding": {"type": "string"}, "reason": {"type": "string"}},
+            "required": ["finding", "reason"], "additionalProperties": False}},
     },
-    "required": ["summary", "suspects", "good", "actions", "experiment", "see_doctor", "photo_note"],
+    "required": ["summary", "suspects", "good", "actions", "experiment", "see_doctor", "photo_note",
+                 "ingredient_findings"],
     "additionalProperties": False,
 }
 
@@ -147,8 +270,26 @@ def _photo_section(photos):
     return names, rule
 
 
-def report(date, period, this_week, prev_week, assoc, records, data_days, last_report, changes, since, photos=None):
-    """photos: [(ファイル名, 撮影日, bytes)] 古い順。"""
+def _product_lines(products):
+    if not products:
+        return "(登録なし)"
+    lines = []
+    for p in products:
+        period = f"{p.get('started') or '以前'}〜{p.get('ended') or '使用中'}"
+        link = f"・「{p['care_item']}」ボタンを押した日に使用" if p.get("care_item") else ""
+        head = f"- {p['name']} ({p['category']}・{period}{link})"
+        if not p.get("ingredients"):
+            lines.append(f"{head}: 成分は未確認")
+            continue
+        flags = "、".join(f"{f['ingredient']}[{f['type']}]" for f in p.get("flags") or []) or "なし"
+        lines.append(f"{head}\n  注意成分: {flags}\n  全成分: {'、'.join(p['ingredients'][:60])}")
+    return "\n".join(lines)
+
+
+def report(date, period, this_week, prev_week, assoc, records, data_days, last_report, changes, since, photos=None,
+           products=None, product_assoc=None):
+    """photos: [(ファイル名, 撮影日, bytes)] 古い順。products: 登録した製品。product_assoc: 製品・成分ごとの集計。"""
+    product_assoc = product_assoc or {"worse": [], "better": []}
     photo_names, photo_rule = _photo_section([(n, d) for n, d, _ in photos or []])
     acne_areas = "、".join(f"{stats.ACNE_AREAS.get(k, k)} {n}個"
                           for k, n in sorted(this_week["acne_by_area"].items(), key=lambda x: -x[1])) or "なし"
@@ -174,6 +315,16 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
 
 悪化しにくいもの:
 {_assoc_lines(assoc['better'])}
+
+## 使っている (使っていた) 化粧品・日用品
+{_product_lines(products)}
+
+## 製品・成分と悪化の関係 (集計済み。「成分」は2つ以上の製品に入っているもの)
+悪化と一緒に起きやすいもの:
+{_assoc_lines(product_assoc['worse'])}
+
+悪化しにくいもの:
+{_assoc_lines(product_assoc['better'])}
 
 ## 変えたこと・あったこと (前後14日の比較。集計済み)
 {_change_lines(changes, since)}
@@ -214,6 +365,15 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
   腫れ・痛み・出血・広い範囲の湿疹がメモにある
   などのときだけ、受診をすすめる理由を1〜2文で。当てはまらなければ空文字。
 {photo_rule}
+- ingredient_findings: 製品の成分から考えられることを最大3つ。製品が未登録・成分が未確認なら空。
+  - 「変えたことの前後比較」や「製品・成分と悪化の関係」で悪化と重なる製品があれば、その製品の注意成分を挙げて関係を説明する
+    (例: 化粧水Bに替えてから赤みが増えた。Bには前の化粧水になかったエタノールと香料が入っている)。
+  - 悪化した時期の製品に共通して入っている成分があれば挙げる。
+  - 記録の悪化と重ならない注意成分は、「今は問題が出ていない」と短く触れる程度にし、やめるようにはすすめない。
+  - 成分が原因かどうかは記録だけでは決められないこと、かぶれが疑われるときは皮膚科のパッチテストで確かめられることを
+    必要に応じて reason に書く。
+  - 製品が原因の候補になるときは suspects にも入れ、actions では商品名ではなく「エタノール・香料の入っていない化粧水を
+    2週間試す」のように成分の条件ですすめる。
 - 記録が少ない場合は、その分だけ断定を避けて短く書く。
 - 文体は「です・ます」。1項目は長くても60字程度。専門用語は避ける。
 """

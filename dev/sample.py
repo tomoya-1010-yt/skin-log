@@ -68,3 +68,32 @@ def entries(today, days=45, seed=7):
         out[d.isoformat()] = e
         prev.append(e)
     return out
+
+
+def products(today=None):
+    """ダミーの製品 (成分は架空)。entries() と同じく18日前に化粧水を替えたことにしてある。"""
+    end = dt.date.fromisoformat(today) if today else dt.date.today()
+    changed = (end - dt.timedelta(days=18)).isoformat()
+    before = (end - dt.timedelta(days=19)).isoformat()
+    base = {"status": "done", "mode": "search", "ingredients_text": "", "sources": ["https://example.com/"],
+            "note": "", "created_at": "", "checked_at": "", "updated_at": "", "ended": None}
+    return [
+        {**base, "id": "p1", "name": "サンプル化粧水A (しっとり)", "category": "化粧水", "care_item": "化粧水",
+         "started": None, "ended": before, "matched_name": "サンプル化粧水A (しっとり)",
+         "ingredients": ["水", "グリセリン", "BG", "ヒアルロン酸Na", "フェノキシエタノール"],
+         "flags": [], "summary": "（サンプル）保湿成分中心の、刺激になりやすい成分が少ない化粧水です。"},
+        {**base, "id": "p2", "name": "サンプル化粧水B (さっぱり)", "category": "化粧水", "care_item": "化粧水",
+         "started": changed, "matched_name": "サンプル化粧水B (さっぱり)",
+         "ingredients": ["水", "エタノール", "グリセリン", "BG", "メントール", "香料", "フェノキシエタノール"],
+         "flags": [{"ingredient": "エタノール", "type": "刺激", "reason": "成分表の前の方にあり、しみることがある"},
+                   {"ingredient": "メントール", "type": "刺激", "reason": "清涼感の成分で、ヒリヒリしやすい"},
+                   {"ingredient": "香料", "type": "かぶれ", "reason": "人によってかぶれの原因になる"}],
+         "summary": "（サンプル）アルコールとメントールが入った、さっぱりタイプの化粧水です。"},
+        {**base, "id": "p3", "name": "サンプル洗顔フォーム", "category": "洗顔", "care_item": "洗顔",
+         "started": None, "matched_name": "サンプル洗顔フォーム",
+         "ingredients": ["水", "ミリスチン酸", "グリセリン", "水酸化K", "ラウリン酸", "香料", "BG"],
+         "flags": [{"ingredient": "香料", "type": "かぶれ", "reason": "人によってかぶれの原因になる"}],
+         "summary": "（サンプル）石けんベースの一般的な洗顔フォームです。"},
+        {**base, "id": "p4", "name": "サンプル柔軟剤", "category": "柔軟剤", "care_item": None, "started": None,
+         "status": "pending", "ingredients": [], "flags": [], "summary": "", "matched_name": ""},
+    ]

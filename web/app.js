@@ -1,6 +1,6 @@
 const $ = (sel) => document.querySelector(sel);
 const main = $("#main");
-const TABS = ["record", "history", "report", "settings"];
+const TABS = ["record", "history", "report", "products", "settings"];
 const WEEKDAYS = "日月火水木金土";
 
 // ---------- 記録の項目 ----------
@@ -68,6 +68,7 @@ let lastChanges = {}; // 変えたことの種類ごとの、表示中の日よ�
 let photo = null; // 表示中の日の顔写真 { date, uploaded_at }
 let prevPhoto = null; // それより前で最後の顔写真 (構図をそろえる見本)
 let photoBusy = false;
+let usedProducts = []; // 表示中の日に使っていた製品 (スキンケア欄に表示)
 let items = null; // { care: [], food: [] }
 let vapidPublicKey = null;
 let reportCache = null;
@@ -224,7 +225,10 @@ function renderRecord() {
 
     ${card("スキンケア", `<p class="sub">朝</p>${chips("care.am", items.care, e.care.am, { add: true })}
       <p class="sub">夜</p>${chips("care.pm", items.care, e.care.pm, { add: true })}
-      ${canCopy ? `<button class="link-btn" id="copy-care">前回（${esc(dateLabel(prev.date))}）と同じにする</button>` : ""}`)}
+      ${canCopy ? `<button class="link-btn" id="copy-care">前回（${esc(dateLabel(prev.date))}）と同じにする</button>` : ""}
+      ${usedProducts.length ? `<p class="hint">使っている製品: ${usedProducts.map((x) =>
+        `${esc(x.name)}${x.care_item ? `（${esc(x.care_item)}）` : ""}`).join(" · ")}</p>`
+        : `<p class="hint">化粧品タブで製品を登録すると、成分まで分析できます。</p>`}`)}
 
     ${changesCard(e)}
 
@@ -475,6 +479,7 @@ async function loadDay(d) {
   prev = s.prev;
   lastChanges = s.last_changes || {};
   photo = s.photo;
+  usedProducts = s.products || [];
   prevPhoto = s.prev_photo;
   entry = normalize(s.entry);
   if (tab === "record") renderRecord();
@@ -595,6 +600,8 @@ function reportHtml(r) {
     ${card("悪化の原因の候補", list(ai.suspects, (s) => `<li><div class="rhead"><b>${esc(s.factor)}</b>
       <span class="conf ${esc(s.confidence)}">${CONF[s.confidence] || ""}</span></div><p>${esc(s.evidence)}</p></li>`))}
     ${effects ? card("変えたことの前後", `<ul class="rlist">${effects}</ul>`) : ""}
+    ${ai.ingredient_findings?.length ? card("成分から考えられること", `<ul class="rlist">${ai.ingredient_findings.map((f) =>
+      `<li><b>${esc(f.finding)}</b><p>${esc(f.reason)}</p></li>`).join("")}</ul>`) : ""}
     ${card("良さそうなこと", list(ai.good, (s) => `<li><b>${esc(s.factor)}</b><p>${esc(s.evidence)}</p></li>`))}
     ${card("おすすめアクション", list(ai.actions, (a) => `<li><b>${esc(a.action)}</b><p>${esc(a.reason)}</p></li>`))}
     ${ai.experiment?.action ? card("来週ためすこと", `<p class="exp">${esc(ai.experiment.action)}</p>
@@ -738,6 +745,10 @@ async function selectTab(name) {
   }
   if (name === "history") return renderHistory();
   if (name === "report") return renderReport();
+  if (name === "products") {
+    products = null; // 調査の結果が出ているかもしれないので毎回取り直す
+    return showProducts();
+  }
   return renderSettings();
 }
 

@@ -1,0 +1,47 @@
+name: 成分の調査
+
+on:
+  schedule:
+    # 7:17〜23:17 JST の毎時 (= 22:17〜14:17 UTC)。調査待ちの製品がなければ Claude は動かさない
+    - cron: "17 22-23,0-14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: products
+  cancel-in-progress: false
+
+jobs:
+  products:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      APP_URL: ${{ vars.APP_URL }}
+      INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 調査待ちの件数
+        id: pending
+        run: echo "count=$(python generator/main.py products --count | tail -n 1)" >> "$GITHUB_OUTPUT"
+      - name: Claude Code をインストール
+        if: steps.pending.outputs.count != '0'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s stable
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: 成分を調べる
+        if: steps.pending.outputs.count != '0'
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "Secret CLAUDE_CODE_OAUTH_TOKEN が空です"; exit 1
+          fi
+          python generator/main.py products

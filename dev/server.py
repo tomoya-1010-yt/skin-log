@@ -4,6 +4,7 @@ web/ を配信し、/api/* を簡易的に再現する。データはメモリ�
 - 合言葉は「dev」
 - 記録は dev/sample.py のダミー (直近45日分)
 - レポートは out/report-*.json (generator の --dry-run 出力) があれば表示する
+- 製品は dev/sample.py のダミー。登録した製品は「調査中」のまま (成分の調査は Actions でしか動かない)
 
   python dev/server.py   → http://localhost:8788
 """
@@ -14,6 +15,7 @@ import pathlib
 import re
 import sys
 import urllib.parse
+import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "dev"))
@@ -35,6 +37,14 @@ def today():
 
 entries = sample.entries(today())
 photos = {}  # date -> (uploaded_at, bytes)
+products = {p["id"]: p for p in sample.products(today())}
+CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め", "ひげ剃りフォーム",
+              "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤",
+              "薬・塗り薬", "その他"]
+
+
+def active(p, d):
+    return (not p.get("started") or p["started"] <= d) and (not p.get("ended") or p["ended"] >= d)
 reports = {}
 for f in sorted((ROOT / "out").glob("report-*.json")):
     r = json.loads(f.read_text(encoding="utf-8"))
@@ -98,6 +108,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                    "prev_photo": ph(prev_ph) if prev_ph else None,
                                    "prev": {"date": p, "entry": entries[p]} if p else None,
                                    "last_changes": last,
+                                   "products": [{k: x[k] for k in ("id", "name", "category", "care_item")}
+                                                for x in products.values() if active(x, d)],
                                    "items": ITEMS, "vapidPublicKey": None})
         if route == "PUT /api/entry":
             b = self.body()
@@ -120,6 +132,39 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if route == "DELETE /api/photo":
             photos.pop(q.get("date"), None)
             return self.send_json({"ok": True})
+        if route == "GET /api/products":
+            return self.send_json({"products": sorted(products.values(), key=lambda x: x.get("started") or "",
+                                                      reverse=True), "categories": CATEGORIES})
+        if route == "POST /api/products":
+            b = self.body()
+            pid = str(uuid.uuid4())
+            if b.get("replace") and b.get("started"):
+                prev_day = (dt.date.fromisoformat(b["started"]) - dt.timedelta(days=1)).isoformat()
+                for x in products.values():
+                    if x["category"] == b["category"] and not x["ended"]:
+                        x["ended"] = prev_day
+            products[pid] = {"id": pid, "name": b["name"], "category": b["category"], "care_item": b.get("care_item") or None,
+                             "started": b.get("started"), "ended": None, "status": "pending", "mode": "search",
+                             "ingredients_text": "", "ingredients": [], "flags": [], "summary": "", "matched_name": "",
+                             "sources": [], "note": "", "updated_at": ""}
+            return self.send_json({"ok": True, "product": products[pid]})
+        m = re.match(r"^/api/products/([\w-]+)$", url.path)
+        if m and m[1] in products:
+            x = products[m[1]]
+            if method == "DELETE":
+                del products[m[1]]
+                return self.send_json({"ok": True})
+            b = self.body()
+            for k in ("ended", "care_item", "started"):
+                if k in b:
+                    x[k] = b[k] or None
+            if b.get("name"):
+                x.update(name=b["name"], status="pending", mode="search")
+            if "ingredients_text" in b:
+                x.update(ingredients_text=b["ingredients_text"], status="pending", mode="manual")
+            if b.get("research"):
+                x.update(status="pending", mode="search")
+            return self.send_json({"ok": True, "product": x})
         if route == "DELETE /api/photos":
             n = len(photos)
             photos.clear()

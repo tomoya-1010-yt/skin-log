@@ -352,3 +352,60 @@ textarea {
 .btn.danger { color: var(--acne); border-color: var(--acne); }
 label.btn { cursor: pointer; text-align: center; }
 #photo-card > label.btn { display: block; }
+
+/* 化粧品タブ */
+.btn.block { display: block; width: 100%; text-align: center; }
+.center { text-align: center; }
+.products .group { font-size: 14px; color: var(--muted); margin: 20px 0 6px; font-weight: 600; }
+.plist { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.prow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  padding: 10px 12px;
+}
+.prow:last-child { border-bottom: none; }
+.pname { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .pmeta { grid-column: 1; font-size: 12px; color: var(--muted); }
+.prow .pstatus { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.pstatus { font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pstatus.warn { border-color: var(--warn); color: var(--warn); }
+.pstatus.ok { border-color: var(--accent); color: var(--accent); }
+.pstatus.nf { border-color: var(--acne); color: var(--acne); }
+.back { padding: 0 0 8px; align-self: flex-start; text-align: left; }
+.pform { display: flex; flex-direction: column; gap: 14px; }
+.pform > label, .pform fieldset { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
+.pform small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.pform fieldset { border: none; padding: 0; margin: 0; }
+.pform legend { padding: 0; margin-bottom: 4px; }
+.pform .radio { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.pform input[type=text], .pform input:not([type]), .pform select, .pform input[type=date], .pactions select {
+  font: inherit;
+  font-size: 15px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+}
+.pdetail .ptitle { font-size: 18px; margin: 0; }
+.pdetail .pmeta { font-size: 13px; color: var(--muted); margin: 2px 0 12px; }
+.pdetail h3 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+.pdetail .card p { margin: 0 0 6px; font-size: 14px; }
+.warn-text { color: var(--acne); }
+.flag { font-size: 11px; border-radius: 999px; padding: 0 8px; border: 1px solid var(--line); white-space: nowrap; }
+.flag.irritant, .ingredients .hit.irritant { color: var(--acne); border-color: var(--acne); }
+.flag.allergy, .ingredients .hit.allergy { color: var(--warn); border-color: var(--warn); }
+.flag.acne, .ingredients .hit.acne { color: #a855f7; border-color: #a855f7; }
+.flag.dry, .ingredients .hit.dry { color: #0284c7; border-color: #0284c7; }
+.ingredients { line-height: 1.9; }
+.ingredients .hit { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.pdetail textarea { margin-bottom: 8px; }
+.pactions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.pactions label.btn { display: flex; flex-direction: column; gap: 4px; width: 100%; font-weight: 400; font-size: 13px; text-align: left; }
+.pactions label.btn select { width: 100%; }

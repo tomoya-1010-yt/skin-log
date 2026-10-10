@@ -3,6 +3,7 @@
 - week(): 対象週と前週の数字 (レポート上部のタイル用)
 - associations(): 「◯◯した日の翌日は、かゆみが出た割合が △% → □%」のような比較
 - change_effects(): 「変えたこと」(化粧品・刃の交換など) の前後14日の比較
+- product_table(): 使った製品と、複数の製品に入っている成分を要因にした表 (associations に渡す)
 """
 import datetime as dt
 
@@ -94,12 +95,13 @@ OUTCOMES = {
 }
 
 
-def associations(entries):
+def associations(entries, table=None, top=(15, 10)):
     """要因ごとに「した日」と「しなかった日」で、当日〜2日後に悪化した割合を比べる。
 
     同じ要因と結果の組み合わせは、差がいちばん大きい日ずれだけを残す。
+    table を省略すると記録の項目 (食べ物・睡眠など) を要因にする。
     """
-    table = factor_table(entries)
+    table = factor_table(entries) if table is None else table
     names = sorted({n for f in table.values() for n in f})
     out = []
     for outcome, fn in OUTCOMES.items():
@@ -126,9 +128,83 @@ def associations(entries):
                             "rate_without": round(r0, 2), "n_without": len(without), "diff": round(r1 - r0, 2)}
             if best and abs(best["diff"]) >= MIN_DIFF:
                 out.append(best)
-    worse = sorted([a for a in out if a["diff"] > 0], key=lambda a: -a["diff"])[:15]
-    better = sorted([a for a in out if a["diff"] < 0], key=lambda a: a["diff"])[:10]
+    worse = sorted([a for a in out if a["diff"] > 0], key=lambda a: -a["diff"])[:top[0]]
+    better = sorted([a for a in out if a["diff"] < 0], key=lambda a: a["diff"])[:top[1]]
     return {"worse": worse, "better": better}
+
+
+# ---------- 製品と成分 ----------
+
+def active(p, d):
+    return (not p.get("started") or p["started"] <= d) and (not p.get("ended") or p["ended"] >= d)
+
+
+def products_used(e, d, products):
+    """その日に使った製品 (名前の集合) と、使ったか分からない製品があったか。
+
+    スキンケアのボタンと結びつけた製品は、その日そのボタンを押したときだけ使ったとみなす。
+    スキンケアを1つも記録していない日は、ボタンと結びつけた製品は不明扱い。
+    """
+    care = e.get("care") or {}
+    pressed = set(care.get("am") or []) | set(care.get("pm") or [])
+    used, unknown = set(), set()
+    for p in products:
+        if not active(p, d):
+            continue
+        if p.get("care_item"):
+            if not pressed:
+                unknown.add(p["name"])
+            elif p["care_item"] in pressed:
+                used.add(p["name"])
+        else:
+            used.add(p["name"])
+    return used, unknown
+
+
+def product_table(entries, products):
+    """「製品: ◯◯」と「成分: ◯◯」を要因にした表。
+
+    成分は2つ以上の製品に入っているものだけを使う (1つの製品にしか入っていない成分は、その製品と同じ比較になる)。
+    使った日の並びがまったく同じ要因は1つにまとめる。
+    """
+    ingredients = {p["name"]: set(p.get("ingredients") or []) for p in products}
+    count = {}
+    for names in ingredients.values():
+        for x in names:
+            count[x] = count.get(x, 0) + 1
+    shared = sorted(x for x, n in count.items() if n >= 2)
+
+    table = {}
+    for d, e in entries.items():
+        used, unknown = products_used(e, d, products)
+        f = {}
+        for p in products:
+            if p["name"] not in unknown:
+                f[f"製品: {p['name']}"] = p["name"] in used
+        if not unknown:  # 使った製品がすべて分かる日だけ成分を数える
+            on = set().union(*(ingredients[n] for n in used)) if used else set()
+            for x in shared:
+                f[f"成分: {x}"] = x in on
+        table[d] = f
+
+    # 同じ並びの要因をまとめる (例: 製品Aにしか入っていない成分の組み合わせ)
+    # 製品を先に、そのうち使用中の製品を先にする (裏返しの要因では、使用中の製品の方を残す)
+    ended = {f"製品: {p['name']}": bool(p.get("ended")) for p in products}
+    names = sorted({n for f in table.values() for n in f}, key=lambda n: (not n.startswith("製品"), ended.get(n, False), n))
+    groups = {}
+    for n in names:
+        key = tuple(table[d].get(n) for d in sorted(table))
+        mirror = tuple(None if v is None else not v for v in key)
+        if mirror in groups:  # 製品Aをやめて製品Bに替えた場合など、ちょうど裏返しの要因は片方だけ残す
+            continue
+        groups.setdefault(key, []).append(n)
+    merged = {}
+    for members in groups.values():
+        label = members[0] if len(members) == 1 else \
+            f"{members[0]} (同じ日: {'、'.join(m.split(': ', 1)[1] for m in members[1:4])}{' ほか' if len(members) > 4 else ''})"
+        merged[members[0]] = label
+    return {d: {merged[n]: v for n, v in f.items() if n in merged} for d, f in table.items()}
+
 
 
 # ---------- 週の数字 ----------

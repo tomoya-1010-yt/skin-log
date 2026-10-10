@@ -8,6 +8,14 @@ const COOKIE_MAX_AGE = 400 * 24 * 3600; // ブラウザが許す最長 (約13か
 const PHOTO_MAX_BYTES = 5 * 1024 * 1024; // 端末側で縮小してから送るので通常は 300KB 前後
 const photoKey = (date) => `photos/${date}.jpg`;
 
+// 化粧品・日用品の種類。替えたときに記録する「変えたこと」の種類を決める
+const PRODUCT_CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め",
+  "ひげ剃りフォーム", "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ",
+  "洗濯洗剤", "柔軟剤", "薬・塗り薬", "その他"];
+const changeKindOf = (category) =>
+  ["シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤"].includes(category) ? "シャンプー・洗剤を変えた"
+    : category === "薬・塗り薬" ? "皮膚科・薬" : "スキンケア用品を変えた";
+
 // ボタンにする項目の初期値。アプリの設定から追加・削除でき、settings テーブルに保存される
 const DEFAULT_ITEMS = {
   care: ["洗顔", "化粧水", "乳液", "保湿クリーム", "日焼け止め", "ひげ剃り", "シャンプー", "薬・塗り薬"],
@@ -23,6 +31,7 @@ const json = (data, init = {}) =>
 
 const jstDate = (ms = Date.now()) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
 const isDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const shiftDate = (date, days) => jstDate(Date.parse(date + "T12:00:00+09:00") + days * DAY);
 
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
@@ -96,10 +105,14 @@ async function state(env, url) {
   const photo = await env.DB.prepare("SELECT date, uploaded_at FROM photos WHERE date = ?").bind(date).first();
   const prevPhoto = await env.DB.prepare("SELECT date, uploaded_at FROM photos WHERE date < ? ORDER BY date DESC LIMIT 1")
     .bind(date).first();
+  // この日に使っていた製品 (記録タブに表示する)
+  const products = (await allProducts(env))
+    .filter((x) => (!x.started || x.started <= date) && (!x.ended || x.ended >= date))
+    .map(({ id, name, category, care_item }) => ({ id, name, category, care_item }));
   return json({
     today, date,
     entry: await entryOf(env, date),
-    photo, prev_photo: prevPhoto,
+    photo, prev_photo: prevPhoto, products,
     prev: prev ? { date: prev.date, entry: JSON.parse(prev.body) } : null,
     last_changes,
     items: await items(env),
@@ -195,6 +208,94 @@ async function subscribe(env, request) {
   return json({ ok: true });
 }
 
+// ---------- 化粧品・日用品 ----------
+
+async function allProducts(env) {
+  const rows = (await env.DB.prepare("SELECT body FROM products").all()).results;
+  return rows.map((r) => JSON.parse(r.body)).sort((a, b) => (b.started || "").localeCompare(a.started || ""));
+}
+
+async function productOf(env, id) {
+  const row = await env.DB.prepare("SELECT body FROM products WHERE id = ?").bind(id).first();
+  return row ? JSON.parse(row.body) : null;
+}
+
+async function saveProduct(env, p) {
+  p.updated_at = new Date().toISOString();
+  await env.DB.prepare("INSERT OR REPLACE INTO products (id, status, body, updated_at) VALUES (?, ?, ?, ?)")
+    .bind(p.id, p.status, JSON.stringify(p), p.updated_at).run();
+}
+
+// その日の記録の「変えたこと」に追記する (記録がなければ作る)
+async function addChange(env, date, kind, note) {
+  const entry = (await entryOf(env, date)) || {};
+  entry.changes = entry.changes || [];
+  const same = entry.changes.find((c) => c.kind === kind);
+  if (same) same.note = same.note ? `${same.note}、${note}` : note;
+  else entry.changes.push({ kind, note });
+  await env.DB.prepare("INSERT OR REPLACE INTO entries (date, body, updated_at) VALUES (?, ?, ?)")
+    .bind(date, JSON.stringify(entry), new Date().toISOString()).run();
+}
+
+const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const ingredientsFromText = (t) => t.split(/[、,，\n]/).map((x) => x.trim()).filter(Boolean).slice(0, 200);
+
+async function createProduct(env, request) {
+  const b = await request.json();
+  const name = text(b.name, 80);
+  if (!name || !PRODUCT_CATEGORIES.includes(b.category)) return json({ error: "bad product" }, { status: 400 });
+  const started = b.started && isDate(b.started) && b.started <= jstDate() ? b.started : null;
+  const p = {
+    id: crypto.randomUUID(), name, category: b.category, care_item: text(b.care_item, 30) || null,
+    started, ended: null, status: "pending", mode: "search",
+    ingredients_text: "", ingredients: [], flags: [], summary: "", matched_name: "", sources: [], note: "",
+    created_at: new Date().toISOString(), checked_at: null,
+  };
+  if (started) {
+    // 同じ種類で使っていた製品は前日までにする
+    const ended = [];
+    if (b.replace) {
+      for (const x of await allProducts(env)) {
+        if (x.category !== p.category || x.ended || (x.started && x.started >= started)) continue;
+        x.ended = shiftDate(started, -1);
+        await saveProduct(env, x);
+        ended.push(x.name);
+      }
+    }
+    await addChange(env, started, changeKindOf(p.category), ended.length ? `${ended.join("・")} → ${name}` : name);
+  }
+  await saveProduct(env, p);
+  return json({ ok: true, product: p });
+}
+
+async function updateProduct(env, request, id) {
+  const p = await productOf(env, id);
+  if (!p) return json({ error: "not found" }, { status: 404 });
+  const b = await request.json();
+  if ("ended" in b) p.ended = b.ended && isDate(b.ended) ? b.ended : null;
+  if ("care_item" in b) p.care_item = text(b.care_item, 30) || null;
+  if ("started" in b) p.started = b.started && isDate(b.started) ? b.started : null;
+  if (b.name && text(b.name, 80) !== p.name) {
+    p.name = text(b.name, 80);
+    Object.assign(p, { status: "pending", mode: "search", ingredients_text: "" });
+  }
+  if (typeof b.ingredients_text === "string") {
+    // 成分を貼り付けたときは、調べずにその成分でチェックだけする
+    p.ingredients_text = text(b.ingredients_text, 6000);
+    Object.assign(p, p.ingredients_text
+      ? { status: "pending", mode: "manual", ingredients: ingredientsFromText(p.ingredients_text) }
+      : { status: "pending", mode: "search" });
+  }
+  if (b.research) Object.assign(p, { status: "pending", mode: "search", ingredients_text: "" });
+  await saveProduct(env, p);
+  return json({ ok: true, product: p });
+}
+
+async function deleteProduct(env, id) {
+  await env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
+  return json({ ok: true });
+}
+
 // 全データの書き出し (バックアップ用)
 async function exportAll(env) {
   const entries = (await env.DB.prepare("SELECT date, body FROM entries ORDER BY date").all()).results;
@@ -204,6 +305,7 @@ async function exportAll(env) {
     exported_at: new Date().toISOString(),
     photos: photos.map((r) => r.date), // 画像そのものは含まない
     items: await items(env),
+    products: await allProducts(env),
     entries: entries.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
     reports: reps.map((r) => JSON.parse(r.body)),
   }, { headers: { "content-disposition": `attachment; filename="skin-log-${jstDate()}.json"` } });
@@ -222,6 +324,24 @@ async function internalEntries(env, url) {
     entries: rows.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
     photos: photos.map((r) => r.date),
   });
+}
+
+async function internalProducts(env, url) {
+  const status = url.searchParams.get("status");
+  const list = await allProducts(env);
+  return json(status ? list.filter((p) => p.status === status) : list);
+}
+
+// 成分の調査結果を保存する。利用者が途中で名前などを変えていたら上書きしない
+async function putProductResult(env, request, id) {
+  const p = await productOf(env, id);
+  if (!p) return json({ error: "not found" }, { status: 404 });
+  const r = await request.json();
+  if (r.updated_at !== p.updated_at) return json({ error: "changed", product: p }, { status: 409 });
+  for (const k of ["status", "ingredients", "flags", "summary", "matched_name", "sources", "note", "checked_at"])
+    if (k in r) p[k] = r[k];
+  await saveProduct(env, p);
+  return json({ ok: true });
 }
 
 async function internalReports(env) {
@@ -263,6 +383,9 @@ export async function onRequest({ request, env }) {
     if (route === "GET /api/internal/reports") return internalReports(env);
     if (route === "PUT /api/internal/report") return putReport(env, request);
     if (route === "GET /api/internal/photo") return getPhoto(env, url.searchParams.get("date"));
+    if (route === "GET /api/internal/products") return internalProducts(env, url);
+    const pr = path.match(/^\/api\/internal\/products\/([\w-]+)$/);
+    if (pr && request.method === "PUT") return putProductResult(env, request, pr[1]);
     if (path === "/api/internal/subscriptions") return subscriptions(env, request);
     return json({ error: "not found" }, { status: 404 });
   }
@@ -283,5 +406,10 @@ export async function onRequest({ request, env }) {
   if (route === "PUT /api/photo") return putPhoto(env, request, url);
   if (route === "DELETE /api/photo") return deletePhoto(env, url);
   if (route === "DELETE /api/photos") return deleteAllPhotos(env);
+  if (route === "GET /api/products") return json({ products: await allProducts(env), categories: PRODUCT_CATEGORIES });
+  if (route === "POST /api/products") return createProduct(env, request);
+  const pm = path.match(/^\/api\/products\/([\w-]+)$/);
+  if (pm && request.method === "PUT") return updateProduct(env, request, pm[1]);
+  if (pm && request.method === "DELETE") return deleteProduct(env, pm[1]);
   return json({ error: "not found" }, { status: 404 });
 }
