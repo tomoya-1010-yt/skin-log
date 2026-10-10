@@ -346,12 +346,9 @@ textarea {
 .photo-guide { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
 .photo-guide figure { margin: 0; flex: none; width: 96px; text-align: center; }
 .photo-guide figure img { width: 96px; border-radius: 8px; display: block; }
-.photo-guide figcaption, .photo-pair figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.photo-guide figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .photo-guide ul { margin: 0; padding-left: 1.2em; font-size: 13px; color: var(--sub); }
 .btn.disabled { opacity: .5; pointer-events: none; }
 .btn.danger { color: var(--acne); border-color: var(--acne); }
 label.btn { cursor: pointer; text-align: center; }
 #photo-card > label.btn { display: block; }
-.photo-pair { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin-bottom: 8px; }
-.photo-pair figure { margin: 0; text-align: center; }
-.photo-pair img { width: 100%; border-radius: 10px; display: block; }

@@ -87,6 +87,8 @@ function dateLabel(d, withYear = false) {
   return `${withYear ? `${y}年` : ""}${m}月${dd}日（${w}）`;
 }
 
+const md = (d) => d.slice(5).split("-").map(Number).join("/"); // 2026-10-04 → 10/4
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -587,10 +589,8 @@ function reportHtml(r) {
     ${counts(w.skin_detail_days) ? `<p class="areas">肌の状態: ${counts(w.skin_detail_days)}</p>` : ""}
 
     ${card("今週のまとめ", `<p>${esc(ai.summary)}</p>`)}
-    ${r.photos?.this ? card("写真の比較", `<div class="photo-pair">
-        ${r.photos.prev ? `<figure><img src="/api/photo?date=${esc(r.photos.prev)}" alt="前の写真"><figcaption>${esc(dateLabel(r.photos.prev))}</figcaption></figure>` : ""}
-        <figure><img src="/api/photo?date=${esc(r.photos.this)}" alt="今週の写真"><figcaption>${esc(dateLabel(r.photos.this))}</figcaption></figure>
-      </div>${ai.photo_note ? `<p>${esc(ai.photo_note)}</p>` : ""}`) : ""}
+    ${r.photos?.this && ai.photo_note ? card("写真から分かること", `<p>${esc(ai.photo_note)}</p>`,
+      { note: r.photos.prev ? `${md(r.photos.prev)}と${md(r.photos.this)}を比較` : `${md(r.photos.this)}撮影` }) : ""}
     ${ai.see_doctor ? `<section class="card warn"><h2>皮膚科の受診をおすすめします</h2><p>${esc(ai.see_doctor)}</p></section>` : ""}
     ${card("悪化の原因の候補", list(ai.suspects, (s) => `<li><div class="rhead"><b>${esc(s.factor)}</b>
       <span class="conf ${esc(s.confidence)}">${CONF[s.confidence] || ""}</span></div><p>${esc(s.evidence)}</p></li>`))}
