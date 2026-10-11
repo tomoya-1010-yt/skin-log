@@ -773,7 +773,7 @@ async function renderSettings() {
     <section><h2>体質メモ</h2>
       <p>遺伝子検査の結果や、皮膚科で言われたこと（アトピー体質、乾燥肌など）を書いておくと、
         週次レポートで参考にします。記録の傾向を優先し、これだけで決めつけることはしません。</p>
-      <textarea id="profile" rows="6" maxlength="3000" placeholder="例: 遺伝子検査 MMP1 II型（シワができやすい）…">${esc(profileText ?? "")}</textarea>
+      <textarea id="profile" rows="6" maxlength="3000" placeholder="例: 皮膚科で乾燥肌と言われた / 遺伝子検査で紫外線の影響を受けやすいタイプだった">${esc(profileText ?? "")}</textarea>
       <div class="row-actions"><button class="btn" id="profile-save">保存</button><span class="hint" id="profile-msg"></span></div></section>
     <section><h2>データ</h2>
       <p>記録とレポートをすべて JSON ファイルで保存します（バックアップ用）。</p>
