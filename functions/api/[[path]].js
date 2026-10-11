@@ -40,10 +40,13 @@ function safeEqual(a, b) {
 
 // ---------- 合言葉 ----------
 
+// 全角・半角の違いと前後の空白・改行を無視して比べる (スマホの入力や Secret の貼り付けで混ざりやすい)
+const normalizePass = (s) => s.normalize("NFKC").trim();
+
 // Cookie に入れる値。合言葉から作るので、合言葉を変えると全端末がログアウトされる
 async function sessionToken(env) {
   const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(env.APP_PASSPHRASE), { name: "HMAC", hash: "SHA-256" },
+  const key = await crypto.subtle.importKey("raw", enc.encode(normalizePass(env.APP_PASSPHRASE)), { name: "HMAC", hash: "SHA-256" },
     false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode("skin-log-session-v1"));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -63,7 +66,7 @@ async function loggedIn(env, request) {
 
 async function login(env, request) {
   const { passphrase } = await request.json().catch(() => ({}));
-  if (typeof passphrase !== "string" || !safeEqual(passphrase, env.APP_PASSPHRASE)) {
+  if (typeof passphrase !== "string" || !safeEqual(normalizePass(passphrase), normalizePass(env.APP_PASSPHRASE))) {
     await new Promise((r) => setTimeout(r, 1000)); // 総当たりを遅くする
     return json({ error: "wrong passphrase" }, { status: 401 });
   }

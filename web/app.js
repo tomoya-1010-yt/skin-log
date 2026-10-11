@@ -113,10 +113,13 @@ function renderLogin(message = "") {
   setHeader("肌ログ");
   main.innerHTML = `<form class="login" id="login">
     <p class="login-lead">合言葉を入力してください</p>
-    <input type="password" id="pass" autocomplete="current-password" placeholder="合言葉" required>
+    <input type="password" id="pass" autocomplete="current-password" autocapitalize="off" autocorrect="off"
+      spellcheck="false" placeholder="合言葉" required>
+    <label class="show-pass"><input type="checkbox" id="show-pass"> 合言葉を表示する</label>
     <button class="btn" type="submit">開く</button>
     <p class="login-msg" id="login-msg">${esc(message)}</p>
   </form>`;
+  $("#show-pass").addEventListener("change", (e) => { $("#pass").type = e.target.checked ? "text" : "password"; });
   $("#login").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector("button");

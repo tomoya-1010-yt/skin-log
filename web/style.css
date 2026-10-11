@@ -399,3 +399,4 @@ label.btn { cursor: pointer; text-align: center; }
 .pactions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .pactions label.btn { display: flex; flex-direction: column; gap: 4px; width: 100%; font-weight: 400; font-size: 13px; text-align: left; }
 .pactions label.btn select { width: 100%; }
+.show-pass { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 6px; }
