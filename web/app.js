@@ -872,12 +872,26 @@ async function start() {
   })());
 }
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+// 新しい版を配信したら、開き直したときに自動で切り替える。
+// iPhone のホーム画面アプリは裏で開いたままのことが多く、読み込み直さないと古い画面が残るため
+let swReg = null;
+if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller; // 初めて開いたときは読み込み直さない
+  navigator.serviceWorker.register("sw.js").then((reg) => { swReg = reg; }).catch(() => {});
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", async () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    await flushSave(); // 入力中の記録を保存してから
+    location.reload();
+  });
+}
 
-// 日付が変わってから開き直したら今日の記録にする
+// 開き直したとき: 新しい版がないか確かめる。日付が変わっていたら今日の記録にする
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") flushSave();
-  else if (entry && tab === "record" && date === today) {
+  if (document.visibilityState === "hidden") return flushSave();
+  swReg?.update().catch(() => {}); // 新しい版があれば取ってくる (あれば controllerchange で読み込み直す)
+  if (entry && tab === "record" && date === today) {
     api("/api/state").then((s) => { if (s.today !== today) guard(loadDay()); }).catch(() => {});
   }
 });
