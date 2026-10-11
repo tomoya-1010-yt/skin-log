@@ -48,7 +48,7 @@ def factors(e):
     """その日の要因を {名前: True/False} で返す。記録していない項目は含めない (不明扱い)。"""
     f = {}
     food = e.get("food") or []
-    if food:  # 何も選んでいない日は「食べなかった」ではなく未記録とみなす
+    if food:  # 何も選んでいない日は「食べなかった」ではなく未記録とみなす (「特になし」を選んだ日は除く)
         f.update({f"食べ物: {x}": True for x in food})
     care = e.get("care") or {}
     used = set(care.get("am") or []) | set(care.get("pm") or [])
@@ -75,7 +75,7 @@ def factor_table(entries):
     table = {}
     for d, e in entries.items():
         f = factors(e)
-        if e.get("food"):
+        if e.get("food") or (e.get("none") or {}).get("food"):
             f = {**{n: False for n in names_food}, **f}
         if (e.get("care") or {}).get("am") or (e.get("care") or {}).get("pm"):
             f = {**{n: False for n in names_care}, **f}
@@ -158,7 +158,7 @@ def products_used(e, d, products):
     """
     care = e.get("care") or {}
     chosen = selected_ids(e)
-    recorded = bool(chosen or care.get("am") or care.get("pm"))
+    recorded = bool(chosen or care.get("am") or care.get("pm") or (e.get("none") or {}).get("supplements"))
     used, unknown = set(), set()
     for p in products:
         if p["category"] in ALWAYS_USED:

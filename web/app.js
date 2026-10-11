@@ -54,6 +54,7 @@ const emptyEntry = () => ({
   alcohol: null,
   exercise: null,
   changes: [], // [{ kind, note }]
+  none: {}, // 「なし」を選んだ項目 { acne, food, supplements } (未入力と区別するため)
   memo: "",
 });
 
@@ -62,7 +63,7 @@ const normalize = (e) => {
   const base = emptyEntry();
   if (!e) return base;
   return { ...base, ...e, itch: { ...base.itch, ...e.itch }, care: { ...base.care, ...e.care },
-    products: { ...base.products, ...e.products }, acne: { ...e.acne } };
+    products: { ...base.products, ...e.products }, acne: { ...e.acne }, none: { ...e.none } };
 };
 
 const acneTotal = (e) => Object.values(e?.acne || {}).reduce((s, n) => s + n, 0);
@@ -76,6 +77,7 @@ let entry = null;
 let prev = null; // 直前の記録 (コピー用)
 let lastChanges = {}; // 変えたことの種類ごとの、表示中の日より前で最後の日付
 let allProducts = []; // 登録した製品 (記録タブのボタン用。id, name, category, started, ended)
+let collapsed = new Set(); // 記録タブでたたんでいるカード
 let items = null; // { care: [], food: [] }
 let vapidPublicKey = null;
 let reportCache = null;
@@ -209,6 +211,64 @@ function card(title, body, { note = "", cls = "" } = {}) {
   return `<section class="card ${cls}"><h2>${esc(title)}${note ? `<span class="note">${note}</span>` : ""}</h2>${body}</section>`;
 }
 
+// 記録タブのカード。入力済みなら見出しに ✓ を付け、たたんでいるときは1行の要約だけ出す
+function rcard(key, title, body, { done = false, summary = "", cls = "", note = "" } = {}) {
+  const closed = collapsed.has(key);
+  return `<section class="card rcard ${cls} ${closed ? "closed" : ""}" id="card-${key}">
+    <h2><button class="rhead-btn" data-toggle="${key}" aria-expanded="${!closed}">
+      <span class="check ${done ? "on" : ""}" aria-hidden="true">${done ? "✓" : ""}</span>
+      <span class="ttl">${esc(title)}</span>
+      ${closed ? `<span class="sum">${esc(summary)}</span>` : note ? `<span class="note">${note}</span>` : ""}
+      <span class="chev" aria-hidden="true"></span></button></h2>
+    ${closed ? "" : body}</section>`;
+}
+
+const noneChip = (key, on, label = "今日はなし") =>
+  `<button class="chip none-chip ${on ? "on" : ""}" data-none="${key}">${label}</button>`;
+const nameOf = (id) => allProducts.find((p) => p.id === id)?.name || "（削除した製品）";
+const shortList = (names, max = 3) => (names.length > max ? `${names.slice(0, max).join("・")} ほか${names.length - max}` : names.join("・"));
+
+// 入力済みかどうかと、たたんだときの要約 (進み具合と折りたたみに使う)
+function recordStatus(e, hasIntake) {
+  const acneN = acneTotal(e);
+  const careNames = [...new Set([...e.products.am, ...e.products.pm].map(nameOf).concat(e.care.am, e.care.pm))];
+  const areas = Object.entries(e.acne).map(([k, n]) => `${ACNE_AREAS[k]}${n}`);
+  const list = [
+    ["skin", "肌の調子", e.skin != null, e.skin ? [SKIN[e.skin - 1], ...e.skin_detail].join(" · ") : ""],
+    ["itch", "かゆみ", e.itch.level != null,
+      e.itch.level == null ? "" : [ITCH[e.itch.level], ...e.itch.times].join(" · ")],
+    ["acne", "ニキビ", acneN > 0 || !!e.none.acne, acneN ? [shortList(areas), ...e.acne_types].join(" · ") : "なし"],
+    ["care", "スキンケア", careNames.length > 0, shortList(careNames)],
+    ...(hasIntake ? [["intake", "飲んだもの", e.supplements.length > 0 || !!e.none.supplements,
+      e.supplements.length ? shortList(e.supplements.map(nameOf)) : "なし"]] : []),
+    ["food", "食べたもの", e.food.length > 0 || !!e.none.food, e.food.length ? shortList(e.food) : "特になし"],
+    ["sleep", "睡眠", e.sleep != null, e.sleep == null ? "" : `${e.sleep}時間`],
+    ["stress", "ストレス", e.stress != null, e.stress ? STRESS[e.stress - 1] : ""],
+    ["alcohol", "お酒", e.alcohol != null, e.alcohol == null ? "" : ALCOHOL[e.alcohol]],
+    ["exercise", "運動", e.exercise != null, e.exercise == null ? "" : EXERCISE[e.exercise]],
+  ];
+  return Object.fromEntries(list.map(([key, label, done, summary]) => [key, { label, done, summary }]));
+}
+
+// 日付を開いたときに、入力済みのカードと「変えたこと」をたたむ (入力中のカードは開いたままにする)
+function initCollapsed() {
+  const st = recordStatus(entry, productsFor(entry).intake.length > 0);
+  collapsed = new Set(Object.keys(st).filter((k) => st[k].done));
+  collapsed.add("changes");
+}
+
+// その日に使える製品 (使用期間中のもの + その日にすでに選んでいたもの)
+function productsFor(e) {
+  const chosen = new Set([...e.products.am, ...e.products.pm, ...e.supplements]);
+  const shown = allProducts.filter((p) => chosen.has(p.id) ||
+    ((!p.started || p.started <= date) && (!p.ended || p.ended >= date)));
+  return {
+    face: shown.filter((p) => productKind(p) === "face"),
+    intake: shown.filter((p) => productKind(p) === "intake"),
+    always: shown.filter((p) => productKind(p) === "always" && !p.ended),
+  };
+}
+
 function renderRecord() {
   setHeader(date === today ? `今日・${dateLabel(date)}` : dateLabel(date), { dayNav: true });
   const e = entry;
@@ -216,56 +276,69 @@ function renderRecord() {
   const itchOpen = (e.itch.level ?? 0) > 0;
   const pe = prev && normalize(prev.entry);
   const canCopy = pe && [pe.care.am, pe.care.pm, pe.products.am, pe.products.pm, pe.supplements].some((x) => x.length);
-  // その日に使える製品 (使用期間中のもの + その日にすでに選んでいたもの)
-  const chosen = new Set([...e.products.am, ...e.products.pm, ...e.supplements]);
-  const shown = allProducts.filter((p) => chosen.has(p.id) ||
-    ((!p.started || p.started <= date) && (!p.ended || p.ended >= date)));
-  const face = shown.filter((p) => productKind(p) === "face");
-  const intake = shown.filter((p) => productKind(p) === "intake");
-  const always = shown.filter((p) => productKind(p) === "always" && !p.ended);
+  const { face, intake, always } = productsFor(e);
   const covered = new Set(face.map((p) => (items.care.includes(p.category) ? p.category : CARE_ITEM_FOR[p.category])));
   const careFor = (sel) => items.care.filter((c) => !covered.has(c) || sel.includes(c));
+  const st = recordStatus(e, intake.length > 0);
+  const keys = Object.keys(st);
+  const doneN = keys.filter((k) => st[k].done).length;
+  const left = keys.filter((k) => !st[k].done);
+  const routineDone = st.care.done && (!st.intake || st.intake.done);
+  const copyNames = pe ? [...new Set([...pe.products.am, ...pe.products.pm, ...pe.supplements].map(nameOf)
+    .concat(pe.care.am, pe.care.pm))] : [];
+  const r = (key, title, body, opts = {}) => rcard(key, title, body, { done: st[key].done, summary: st[key].summary, ...opts });
 
   main.innerHTML = `<div class="record">
-    ${card("肌の調子", `${seg("skin", SKIN, e.skin, { offset: 1 })}
+    <section class="card progress-card ${left.length ? "" : "complete"}">
+      <div class="progress-head"><b>${left.length ? `${doneN} / ${keys.length} 入力済み` : "✓ 全部入力しました"}</b>
+        ${left.length ? "" : `<span class="note">おつかれさまです</span>`}</div>
+      <div class="bar"><div style="width:${(doneN / keys.length) * 100}%"></div></div>
+      ${canCopy && !routineDone ? `<button class="btn block routine" data-copy>いつものケアとサプリを入れる
+        <small>前回（${esc(dateLabel(prev.date))}）と同じ: ${esc(shortList(copyNames, 4))}</small></button>` : ""}
+      ${left.length ? `<p class="left">残り: ${left.map((k) => `<button class="jump" data-jump="${k}">${esc(st[k].label)}</button>`).join("")}</p>` : ""}
+    </section>
+
+    ${r("skin", "肌の調子", `${seg("skin", SKIN, e.skin, { offset: 1 })}
       <p class="sub">気になること</p>${chips("skin_detail", SKIN_DETAIL, e.skin_detail)}`, { cls: "skin-card" })}
 
-    ${card("かゆみ", `${seg("itch.level", ITCH, e.itch.level)}
+    ${r("itch", "かゆみ", `${seg("itch.level", ITCH, e.itch.level)}
       ${itchOpen ? `<p class="sub">いつ？</p>${chips("itch.times", ITCH_TIMES, e.itch.times)}
         <p class="sub">どこ？</p>${chips("itch.areas", ITCH_AREAS, e.itch.areas)}` : ""}`)}
 
-    ${card("新しいニキビ", `${faceSvg(e.acne)}
+    ${r("acne", "新しいニキビ", `${faceSvg(e.acne)}
       <div class="chips body-areas">${BODY_AREAS.map((id) => {
         const n = e.acne[id] || 0;
         return `<button class="chip ${n ? "on" : ""}" data-area="${id}">${ACNE_AREAS[id]}${n ? ` <b>${n}</b>` : ""}</button>`;
-      }).join("")}</div>
+      }).join("")}${noneChip("acne", !!e.none.acne)}</div>
       <p class="hint">タップで1個ずつ増え、3の次は0に戻ります。鏡で見たときの向きです。</p>
       ${acneN ? `<p class="sub">どんなニキビ？</p>${chips("acne_types", ACNE_TYPES, e.acne_types)}` : ""}`,
-      { note: acneN ? `${acneN}個` : "なし" })}
+      { note: acneN ? `${acneN}個` : "" })}
 
-    ${card("スキンケア", `<p class="sub">朝</p>${productChips("products.am", face, e.products.am)}${chips("care.am", careFor(e.care.am), e.care.am, { add: true })}
+    ${r("care", "スキンケア", `<p class="sub">朝</p>${productChips("products.am", face, e.products.am)}${chips("care.am", careFor(e.care.am), e.care.am, { add: true })}
       <p class="sub">夜</p>${productChips("products.pm", face, e.products.pm)}${chips("care.pm", careFor(e.care.pm), e.care.pm, { add: true })}
-      ${canCopy ? `<button class="link-btn" id="copy-care">前回（${esc(dateLabel(prev.date))}）と同じにする</button>` : ""}
+      ${canCopy ? `<button class="link-btn" data-copy>前回（${esc(dateLabel(prev.date))}）と同じにする</button>` : ""}
       <p class="hint">${face.length ? "◆ は化粧品タブで登録した製品です。" : "化粧品タブで製品を登録すると、製品ごとのボタンが出て成分まで分析できます。"}
         ${always.length ? `毎日使っているもの: ${always.map((p) => esc(p.name)).join(" · ")}` : ""}</p>`)}
 
-    ${card("飲んだもの（サプリ・薬）", intake.length ? productChips("supplements", intake, e.supplements)
-      : `<p class="hint">化粧品タブで種類を「サプリ」「飲み薬」にして登録すると、ここにボタンが出ます。</p>`)}
+    ${intake.length ? r("intake", "飲んだもの（サプリ・薬）",
+      `${productChips("supplements", intake, e.supplements)}<div class="chips">${noneChip("supplements", !!e.none.supplements, "飲んでいない")}</div>`)
+      : card("飲んだもの（サプリ・薬）", `<p class="hint">化粧品タブで種類を「サプリ」「飲み薬」にして登録すると、ここにボタンが出ます。</p>`)}
 
-    ${changesCard(e)}
-
-    ${card("食べたもの", `${chips("food", items.food, e.food, { add: true })}
+    ${r("food", "食べたもの", `${chips("food", items.food, e.food, { add: true })}
+      <div class="chips">${noneChip("food", !!e.none.food, "特になし")}</div>
       <p class="hint">肌に関係しそうなものだけで大丈夫です。</p>`)}
 
-    ${card("睡眠", `<div class="stepper" data-field="sleep">
+    ${r("sleep", "睡眠", `<div class="stepper" data-field="sleep">
         <button data-step="-0.5" aria-label="30分減らす">−</button>
         <output>${e.sleep == null ? "–" : `${e.sleep}<small>時間</small>`}</output>
         <button data-step="0.5" aria-label="30分増やす">＋</button>
       </div>`)}
 
-    ${card("ストレス", seg("stress", STRESS, e.stress, { offset: 1 }))}
-    ${card("お酒", seg("alcohol", ALCOHOL, e.alcohol, { hints: ALCOHOL_HINT }))}
-    ${card("運動", seg("exercise", EXERCISE, e.exercise, { hints: EXERCISE_HINT }))}
+    ${r("stress", "ストレス", seg("stress", STRESS, e.stress, { offset: 1 }))}
+    ${r("alcohol", "お酒", seg("alcohol", ALCOHOL, e.alcohol, { hints: ALCOHOL_HINT }))}
+    ${r("exercise", "運動", seg("exercise", EXERCISE, e.exercise, { hints: EXERCISE_HINT }))}
+
+    ${changesCard(e)}
 
     ${card("メモ", `<textarea id="memo" rows="3" placeholder="気づいたこと（新しい化粧品、外出先、体調など）">${esc(e.memo)}</textarea>`)}
   </div>`;
@@ -285,10 +358,11 @@ function changesCard(e) {
       placeholder="${esc(CHANGE_HINT[c.kind] || "内容（なくても可）")}"></label>`).join("");
   const last = CHANGES.filter((k) => lastChanges[k] && !on(k))
     .map((k) => `${k.replace(/を(変えた|交換)$/, "")} ${daysBetween(lastChanges[k], date)}日前`);
-  return card("変えたこと・あったこと", `<div class="chips" data-changes>${CHANGES.map((k) =>
+  return rcard("changes", "変えたこと・あったこと", `<div class="chips" data-changes>${CHANGES.map((k) =>
       `<button class="chip ${on(k) ? "on" : ""}" data-change="${esc(k)}">${esc(k)}</button>`).join("")}</div>
     ${notes}
-    <p class="hint">${last.length ? `前回: ${last.map(esc).join(" · ")}` : "変えた日だけ押してください。レポートで前後を比べます。"}</p>`);
+    <p class="hint">${last.length ? `前回: ${last.map(esc).join(" · ")}` : "変えた日だけ押してください。レポートで前後を比べます。"}</p>`,
+    { done: e.changes.length > 0, summary: e.changes.length ? e.changes.map((c) => c.kind).join("・") : "なし（変えた日だけ記録）" });
 }
 
 // 値を変えたら少し待ってから保存する (連続でタップしても1回で済む)
@@ -353,12 +427,38 @@ async function addItem(group) {
 
 function onRecordClick(e) {
   const t = e.target;
+  const toggle = t.closest("[data-toggle]");
+  if (toggle) {
+    const k = toggle.dataset.toggle;
+    if (collapsed.has(k)) collapsed.delete(k);
+    else collapsed.add(k);
+    return renderRecord();
+  }
+  const jump = t.closest("[data-jump]");
+  if (jump) {
+    collapsed.delete(jump.dataset.jump);
+    renderRecord();
+    return $(`#card-${jump.dataset.jump}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const none = t.closest("[data-none]");
+  if (none) {
+    const k = none.dataset.none;
+    entry.none[k] = !entry.none[k];
+    if (entry.none[k]) {
+      if (k === "acne") Object.assign(entry, { acne: {}, acne_types: [] });
+      if (k === "food") entry.food = [];
+      if (k === "supplements") entry.supplements = [];
+    }
+    renderRecord();
+    return scheduleSave();
+  }
   const area = t.closest("[data-area]");
   if (area) {
     const id = area.dataset.area;
     const n = ((entry.acne[id] || 0) + 1) % 4;
     if (n) entry.acne[id] = n;
     else delete entry.acne[id];
+    entry.none.acne = false;
     if (!acneTotal(entry)) entry.acne_types = [];
     renderRecord();
     return scheduleSave();
@@ -388,8 +488,11 @@ function onRecordClick(e) {
   if (add) return addItem(add.dataset.add);
   const chip = t.closest(".chips[data-group] .chip");
   if (chip) {
-    toggleIn(getField(chip.parentElement.dataset.group), chip.dataset.v);
-    chip.classList.toggle("on");
+    const group = chip.parentElement.dataset.group;
+    toggleIn(getField(group), chip.dataset.v);
+    if (group === "food") entry.none.food = false;
+    if (group === "supplements") entry.none.supplements = false;
+    renderRecord(); // 入力済みの数を更新する
     return scheduleSave();
   }
   const step = t.closest("[data-step]");
@@ -399,11 +502,14 @@ function onRecordClick(e) {
     renderRecord();
     return scheduleSave();
   }
-  if (t.id === "copy-care") {
+  if (t.closest("[data-copy]")) {
     const pe = normalize(prev.entry);
     entry.care = { am: [...pe.care.am], pm: [...pe.care.pm] };
     entry.products = { am: [...pe.products.am], pm: [...pe.products.pm] };
     entry.supplements = [...pe.supplements];
+    entry.none.supplements = !!pe.none.supplements;
+    collapsed.add("care");
+    collapsed.add("intake");
     renderRecord();
     return scheduleSave();
   }
@@ -439,6 +545,7 @@ async function loadDay(d) {
   lastChanges = s.last_changes || {};
   allProducts = s.products || [];
   entry = normalize(s.entry);
+  initCollapsed();
   if (tab === "record") renderRecord();
 }
 
