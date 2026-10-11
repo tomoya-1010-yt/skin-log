@@ -45,6 +45,8 @@
 }
 
 * { box-sizing: border-box; }
+/* display を指定した要素でも hidden 属性で隠れるようにする */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -304,7 +306,6 @@ textarea {
   -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--line);
 }
-.tabs[hidden] { display: none; }
 .tabs button {
   flex: 1;
   border: none;
