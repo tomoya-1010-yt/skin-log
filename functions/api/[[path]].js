@@ -151,6 +151,26 @@ async function putItems(env, request) {
   return json({ ok: true });
 }
 
+// 体質メモ (遺伝子検査の結果など)。週次レポートで参考情報として使う
+const PROFILE_MAX = 3000;
+
+async function profileOf(env) {
+  const row = await env.DB.prepare("SELECT body FROM settings WHERE key = 'profile'").first();
+  return row ? JSON.parse(row.body).text : "";
+}
+
+async function putProfile(env, request) {
+  const { text } = await request.json();
+  if (typeof text !== "string" || text.length > PROFILE_MAX) return json({ error: "bad profile" }, { status: 400 });
+  if (text.trim()) {
+    await env.DB.prepare("INSERT OR REPLACE INTO settings (key, body) VALUES ('profile', ?)")
+      .bind(JSON.stringify({ text: text.trim(), updated_at: new Date().toISOString() })).run();
+  } else {
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'profile'").run();
+  }
+  return json({ ok: true });
+}
+
 async function subscribe(env, request) {
   const { subscription } = await request.json();
   if (!subscription?.endpoint) return json({ error: "invalid subscription" }, { status: 400 });
@@ -255,6 +275,7 @@ async function exportAll(env) {
     exported_at: new Date().toISOString(),
     items: await items(env),
     products: await allProducts(env),
+    profile: await profileOf(env),
     entries: entries.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
     reports: reps.map((r) => JSON.parse(r.body)),
   }, { headers: { "content-disposition": `attachment; filename="skin-log-${jstDate()}.json"` } });
@@ -269,6 +290,7 @@ async function internalEntries(env, url) {
   return json({
     today: jstDate(),
     items: await items(env),
+    profile: await profileOf(env),
     entries: rows.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
   });
 }
@@ -348,6 +370,8 @@ export async function onRequest({ request, env }) {
   if (route === "PUT /api/items") return putItems(env, request);
   if (route === "POST /api/subscribe") return subscribe(env, request);
   if (route === "GET /api/export") return exportAll(env);
+  if (route === "GET /api/profile") return json({ text: await profileOf(env), max: PROFILE_MAX });
+  if (route === "PUT /api/profile") return putProfile(env, request);
   if (route === "GET /api/products") return json({ products: await allProducts(env), categories: PRODUCT_CATEGORIES });
   if (route === "POST /api/products") return createProduct(env, request);
   const pm = path.match(/^\/api\/products\/([\w-]+)$/);

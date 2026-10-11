@@ -289,8 +289,8 @@ def _product_lines(products):
 
 
 def report(date, period, this_week, prev_week, assoc, records, data_days, last_report, changes, since,
-           products=None, product_assoc=None):
-    """products: 登録した製品。product_assoc: 製品・成分ごとの集計。"""
+           products=None, product_assoc=None, profile=""):
+    """products: 登録した製品。product_assoc: 製品・成分ごとの集計。profile: 本人が書いた体質メモ。"""
     product_assoc = product_assoc or {"worse": [], "better": []}
     acne_areas = "、".join(f"{stats.ACNE_AREAS.get(k, k)} {n}個"
                           for k, n in sorted(this_week["acne_by_area"].items(), key=lambda x: -x[1])) or "なし"
@@ -336,6 +336,9 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
 ## 前回のレポートで提案したこと
 {last}
 
+## 体質についての参考情報 (本人が設定で書いたもの。遺伝子検査の結果など)
+{profile.strip() or "(なし)"}
+
 ## 書き方
 - summary: 対象週の肌の様子と前週との違いを2〜3文で。前回の提案を実行できたか記録から読み取れれば触れる。
 - suspects: 悪化の原因の候補を最大4つ、可能性の高い順に。
@@ -373,6 +376,12 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
     2週間試す」のように成分の条件ですすめる。
   - サプリ・飲み薬も同じように見てよい。ただし飲み薬は医師に処方されている可能性があるので、やめる・減らすようには
     すすめず、気になる場合は処方した医師や薬剤師に相談するよう書く。サプリの効果は言い切らない。
+- 体質の参考情報は、記録の傾向を説明したり対策の優先順位を決めたりする補助にだけ使う。
+  - 記録の集計・メモを常に優先し、参考情報だけを根拠に原因の候補を挙げない。
+  - 市販の遺伝子検査は、1つの遺伝子の違いが肌に与える影響は小さく、科学的な根拠も限られている。
+    「遺伝子のせいで」と言い切らず、「〜の傾向があるとされるので」のように控えめに書く。
+  - 記録と関係が薄ければ触れなくてよい。触れる場合も毎週同じことを繰り返さず、記録と結びつくときだけにする。
+  - サプリや高価な化粧品を、参考情報だけを理由にすすめない。
 - 記録が少ない場合は、その分だけ断定を避けて短く書く。
 - 文体は「です・ます」。1項目は長くても60字程度。専門用語は避ける。
 """

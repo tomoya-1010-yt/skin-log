@@ -482,3 +482,8 @@ label.btn { cursor: pointer; text-align: center; }
 .todo li { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-weight: 600; font-size: 15px; }
 .todo li:first-child { border-top: none; padding-top: 0; }
 .todo-kind { flex: none; font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 7px; }
+
+/* 設定: 体質メモ */
+.settings textarea { margin: 4px 0 8px; font-size: 14px; }
+.row-actions { display: flex; align-items: center; gap: 10px; }
+.row-actions .hint { margin: 0; }

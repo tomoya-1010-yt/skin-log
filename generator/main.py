@@ -49,6 +49,7 @@ def weekly(args, today):
     if args.dry_run:
         entries, last_report = load_local(args.input, today)
         products = load_local_products(args.input)
+        profile = json.loads(pathlib.Path(args.input).read_text(encoding="utf-8")).get("profile", "") if args.input else ""
     else:
         reps = store.reports()
         if today in reps["ids"] and not args.force:
@@ -57,6 +58,7 @@ def weekly(args, today):
         last_report = reps["latest"]
         data = store.entries(stats.shift(today, -HISTORY_DAYS))
         entries = {r["date"]: r["entry"] for r in data["entries"]}
+        profile = data.get("profile") or ""
         products = store.products()
     entries = {d: e for d, e in entries.items() if d < today}  # 今日の分は書きかけなので使わない
 
@@ -78,7 +80,7 @@ def weekly(args, today):
     since = stats.last_changes(entries, today)
     product_assoc = stats.associations(entries, stats.product_table(entries, products), top=(8, 5))
     ai = llm.report(today, period, this_week, prev_week, assoc, records, len(entries), last_report, changes, since,
-                    products, product_assoc)
+                    products, product_assoc, profile)
 
     report = {
         "id": today,

@@ -761,12 +761,20 @@ function itemEditor(kind, title) {
       <button class="chip add" data-add-item="${kind}">＋ 追加</button></div></section>`;
 }
 
+let profileText = null; // 体質メモ (設定タブを開いたときに読む)
+
 async function renderSettings() {
   setHeader("設定");
+  if (profileText === null) profileText = (await api("/api/profile")).text;
   main.innerHTML = `<div class="settings">
     <section><h2>通知</h2><p id="push-msg">確認中…</p><div id="push-action"></div></section>
     ${itemEditor("care", "スキンケア")}
     ${itemEditor("food", "食べたもの")}
+    <section><h2>体質メモ</h2>
+      <p>遺伝子検査の結果や、皮膚科で言われたこと（アトピー体質、乾燥肌など）を書いておくと、
+        週次レポートで参考にします。記録の傾向を優先し、これだけで決めつけることはしません。</p>
+      <textarea id="profile" rows="6" maxlength="3000" placeholder="例: 遺伝子検査 MMP1 II型（シワができやすい）…">${esc(profileText ?? "")}</textarea>
+      <div class="row-actions"><button class="btn" id="profile-save">保存</button><span class="hint" id="profile-msg"></span></div></section>
     <section><h2>データ</h2>
       <p>記録とレポートをすべて JSON ファイルで保存します（バックアップ用）。</p>
       <a class="btn ghost" href="/api/export" download>データを書き出す</a></section>
@@ -809,6 +817,19 @@ main.addEventListener("click", async (e) => {
     if (!name || items[kind].includes(name)) return;
     if (name.length > 30) return alert("30文字以内で入力してください");
     items[kind].push(name);
+  } else if (e.target.id === "profile-save") {
+    const text = $("#profile").value;
+    e.target.disabled = true;
+    try {
+      await api("/api/profile", { method: "PUT", body: { text } });
+      profileText = text.trim();
+      $("#profile-msg").textContent = "保存しました ✓";
+    } catch (err) {
+      if (err instanceof LoginRequired) return renderLogin();
+      $("#profile-msg").textContent = "保存できませんでした";
+    }
+    e.target.disabled = false;
+    return;
   } else if (e.target.id === "logout") {
     await api("/api/logout", { method: "POST" }).catch(() => {});
     return renderLogin();

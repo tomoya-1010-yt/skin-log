@@ -36,6 +36,7 @@ def today():
 
 
 entries = sample.entries(today())
+PROFILE = {"text": ""}
 products = {p["id"]: p for p in sample.products(today())}
 CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め", "ひげ剃りフォーム",
               "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤",
@@ -136,6 +137,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if b.get("research"):
                 x.update(status="pending", mode="search")
             return self.send_json({"ok": True, "product": x})
+        if route == "GET /api/profile":
+            return self.send_json({"text": PROFILE["text"], "max": 3000})
+        if route == "PUT /api/profile":
+            PROFILE["text"] = self.body().get("text", "").strip()
+            return self.send_json({"ok": True})
         if route == "GET /api/reports":
             ids = sorted(reports, reverse=True)
             rid = q.get("id") or (ids[0] if ids else None)
