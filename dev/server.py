@@ -39,7 +39,7 @@ entries = sample.entries(today())
 products = {p["id"]: p for p in sample.products(today())}
 CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め", "ひげ剃りフォーム",
               "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤",
-              "薬・塗り薬", "その他"]
+              "塗り薬", "サプリ", "飲み薬", "その他"]
 
 
 def active(p, d):
@@ -93,8 +93,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_json({"today": t, "date": d, "entry": entries.get(d),
                                    "prev": {"date": p, "entry": entries[p]} if p else None,
                                    "last_changes": last,
-                                   "products": [{k: x[k] for k in ("id", "name", "category", "care_item")}
-                                                for x in products.values() if active(x, d)],
+                                   "products": [{k: x.get(k) for k in ("id", "name", "category", "started", "ended")}
+                                                for x in products.values()],
                                    "items": ITEMS, "vapidPublicKey": None})
         if route == "PUT /api/entry":
             b = self.body()
@@ -114,7 +114,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 for x in products.values():
                     if x["category"] == b["category"] and not x["ended"]:
                         x["ended"] = prev_day
-            products[pid] = {"id": pid, "name": b["name"], "category": b["category"], "care_item": b.get("care_item") or None,
+            products[pid] = {"id": pid, "name": b["name"], "category": b["category"],
                              "started": b.get("started"), "ended": None, "status": "pending", "mode": "search",
                              "ingredients_text": "", "ingredients": [], "flags": [], "summary": "", "matched_name": "",
                              "sources": [], "note": "", "updated_at": ""}
@@ -126,7 +126,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 del products[m[1]]
                 return self.send_json({"ok": True})
             b = self.body()
-            for k in ("ended", "care_item", "started"):
+            for k in ("ended", "started"):
                 if k in b:
                     x[k] = b[k] or None
             if b.get("name"):

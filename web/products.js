@@ -1,11 +1,12 @@
-// 化粧品タブ: 使っている化粧品・日用品の登録と、Claude が調べた成分の表示。
-// app.js の後に読み込み、app.js の関数 (api, esc, card, setHeader, guard など) を使う。
+// 化粧品タブ: 使っている化粧品・日用品・サプリの登録と、Claude が調べた成分の表示。
+// app.js の後に読み込み、app.js の関数と定数 (api, esc, card, setHeader, guard, productKind など) を使う。
 
 const FLAG_CLASS = { 刺激: "irritant", ニキビ: "acne", かぶれ: "allergy", 乾燥: "dry" };
-// 種類と、記録タブのスキンケアのボタンの対応 (同じ名前のボタンがあればそれを使う)
-const CARE_ITEM_FOR = { ひげ剃りフォーム: "ひげ剃り", アフターシェーブ: "ひげ剃り", クレンジング: "洗顔", 美容液: "化粧水" };
-// 毎日使うと決まっていて、ボタンと結びつけなくてよい種類
-const ALWAYS_USED = ["コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤"];
+const KIND_HINT = {
+  face: "記録タブのスキンケア欄に、この製品のボタンが出ます。使った日に朝・夜それぞれ押してください。",
+  intake: "記録タブの「飲んだもの」欄に、この製品のボタンが出ます。飲んだ日に押してください。",
+  always: "使用期間中は毎日使ったとみなします。替えたときだけ、新しい製品を「替えた」で登録してください。",
+};
 
 let products = null; // { products: [...], categories: [...] }
 let productView = { mode: "list", id: null }; // list | add | detail
@@ -30,24 +31,17 @@ function productRow(p) {
 }
 
 function renderProductList() {
-  setHeader("化粧品・日用品");
+  setHeader("化粧品・サプリ");
   const list = products.products;
   const using = list.filter((p) => !p.ended);
   const past = list.filter((p) => p.ended);
   main.innerHTML = `<div class="products">
     <button class="btn block" id="product-add">＋ 製品を追加</button>
-    ${list.length ? "" : `<p class="hint center">使っている化粧水・洗顔・シャンプー・洗濯洗剤などを登録すると、
+    ${list.length ? "" : `<p class="hint center">使っている化粧水・洗顔・シャンプー・洗濯洗剤・サプリなどを登録すると、
       Claude が成分を調べ、週次レポートで記録と照らし合わせます。</p>`}
     ${using.length ? `<h2 class="group">使用中</h2><div class="plist">${using.map(productRow).join("")}</div>` : ""}
     ${past.length ? `<h2 class="group">使うのをやめた</h2><div class="plist">${past.map(productRow).join("")}</div>` : ""}
   </div>`;
-}
-
-function careOptions(category, selected) {
-  const guess = items.care.includes(category) ? category : CARE_ITEM_FOR[category];
-  const value = selected === undefined ? (ALWAYS_USED.includes(category) ? "" : guess || "") : selected || "";
-  return `<option value="">結びつけない（使用期間中は毎日使う）</option>` + items.care.map((c) =>
-    `<option value="${esc(c)}" ${c === value ? "selected" : ""}>「${esc(c)}」を押した日に使う</option>`).join("");
 }
 
 function renderProductAdd() {
@@ -58,27 +52,31 @@ function renderProductAdd() {
     <label>商品名<small>メーカー名も入れると見つけやすくなります（例: 〇〇 薬用化粧水 さっぱり）</small>
       <input name="name" required maxlength="80" autocomplete="off"></label>
     <label>種類<select name="category">${cats.map((c) => `<option>${esc(c)}</option>`).join("")}</select></label>
-    <label>記録との結びつけ<select name="care_item">${careOptions(cats[0])}</select></label>
-    <fieldset><legend>使い始め</legend>
+    <p class="hint" id="kind-hint"></p>
+    <fieldset id="when-box"><legend>使い始め</legend>
       <label class="radio"><input type="radio" name="when" value="before" checked> 前から使っている</label>
       <label class="radio"><input type="radio" name="when" value="today"> 今日から（替えた）</label>
       <label class="radio"><input type="radio" name="when" value="date"> 日付を指定 <input type="date" name="started" max="${today}"></label>
     </fieldset>
     <label class="radio replace" hidden><input type="checkbox" name="replace" checked> <span></span></label>
     <button class="btn block" type="submit">登録する</button>
-    <p class="hint">登録すると、1時間以内（7〜23時）に Claude が Web で全成分を調べます。
-      替えた日を指定すると、その日の記録の「変えたこと」にも自動で入ります。</p>
+    <p class="hint">登録すると、1時間以内（7〜23時）に Claude が Web で全成分を調べます。</p>
   </form>`;
   updateReplace();
 }
 
+// 種類に合わせて説明を変える。使い始めは髪・体・洗濯のものだけ聞く (顔・サプリは使った日を記録するので不要)
 // 同じ種類の使用中の製品があり、使い始めを「替えた」にしたときだけ「前の製品をやめる」を出す
 function updateReplace() {
   const f = $("#pform");
   if (!f) return;
+  const kind = productKind({ category: f.category.value });
+  $("#kind-hint").textContent = KIND_HINT[kind];
+  $("#when-box").hidden = kind !== "always";
+  if (kind !== "always") f.querySelector('[value="before"]').checked = true;
   const others = products.products.filter((p) => !p.ended && p.category === f.category.value);
   const box = f.querySelector(".replace");
-  box.hidden = !others.length || f.when.value === "before";
+  box.hidden = kind !== "always" || !others.length || f.when.value === "before";
   box.querySelector("span").textContent = `「${others.map((p) => p.name).join("」「")}」は前日で使うのをやめたことにする`;
 }
 
@@ -89,7 +87,7 @@ async function submitProduct(f) {
   f.querySelector("[type=submit]").disabled = true;
   try {
     await api("/api/products", { method: "POST", body: {
-      name: f.name.value, category: f.category.value, care_item: f.care_item.value, started,
+      name: f.name.value, category: f.category.value, started,
       replace: !f.querySelector(".replace").hidden && f.replace.checked,
     } });
     await loadProducts();
@@ -133,8 +131,9 @@ function renderProductDetail() {
   main.innerHTML = `<div class="pdetail">
     <button class="link-btn back" data-back>‹ 一覧に戻る</button>
     <h2 class="ptitle">${esc(p.name)}</h2>
-    <p class="pmeta">${p.started ? `${esc(dateLabel(p.started, true))}から` : "前から"}${p.ended ? `${esc(dateLabel(p.ended, true))}まで` : "使用中"}
-      · ${p.care_item ? `「${esc(p.care_item)}」を押した日に使用` : "使用期間中は毎日"}</p>
+    <p class="pmeta">${p.ended ? `${p.started ? `${esc(dateLabel(p.started, true))}から` : ""}${esc(dateLabel(p.ended, true))}まで使用`
+      : productKind(p) === "always" ? `${p.started ? `${esc(dateLabel(p.started, true))}から` : "前から"}使用中（毎日使ったとみなす）`
+      : productKind(p) === "intake" ? "飲んだ日を記録タブで選ぶ" : "使った日を記録タブで選ぶ"}</p>
     ${card("成分", result)}
     <section class="card"><h2>成分表示を貼り付ける</h2>
       <p class="hint">見つからないときや違う商品だったときは、パッケージや公式サイトの全成分を貼り付けてください。</p>
@@ -143,7 +142,6 @@ function renderProductDetail() {
     <div class="pactions">
       <button class="btn ghost" id="p-rename">名前を直す</button>
       <button class="btn ghost" id="p-research">Web で調べ直す</button>
-      <label class="btn ghost">記録との結びつけ<select id="p-care">${careOptions(p.category, p.care_item)}</select></label>
       ${p.ended ? `<button class="btn ghost" id="p-reuse">使用中に戻す</button>`
         : `<button class="btn ghost" id="p-end">今日で使うのをやめた</button>`}
       <button class="btn ghost danger" id="p-delete">削除</button>
@@ -220,15 +218,11 @@ main.addEventListener("click", async (e) => {
 main.addEventListener("change", (e) => {
   if (tab !== "products") return;
   const f = $("#pform");
-  if (f && e.target.name === "category") {
-    f.care_item.innerHTML = careOptions(e.target.value);
-    updateReplace();
-  }
+  if (f && e.target.name === "category") updateReplace();
   if (f && (e.target.name === "when" || e.target.name === "started")) {
     if (e.target.name === "started") f.querySelector('[value="date"]').checked = true;
     updateReplace();
   }
-  if (e.target.id === "p-care") updateProduct({ care_item: e.target.value });
 });
 
 main.addEventListener("submit", (e) => {

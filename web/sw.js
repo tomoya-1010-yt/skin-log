@@ -1,4 +1,4 @@
-const CACHE = "skin-v8";
+const CACHE = "skin-v9";
 const SHELL = ["./", "index.html", "app.js", "products.js", "style.css", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (e) => {

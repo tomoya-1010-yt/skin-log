@@ -9,10 +9,10 @@ const COOKIE_MAX_AGE = 400 * 24 * 3600; // ブラウザが許す最長 (約13か
 // 化粧品・日用品の種類。替えたときに記録する「変えたこと」の種類を決める
 const PRODUCT_CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め",
   "ひげ剃りフォーム", "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ",
-  "洗濯洗剤", "柔軟剤", "薬・塗り薬", "その他"];
+  "洗濯洗剤", "柔軟剤", "塗り薬", "サプリ", "飲み薬", "その他"];
 const changeKindOf = (category) =>
   ["シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤"].includes(category) ? "シャンプー・洗剤を変えた"
-    : category === "薬・塗り薬" ? "皮膚科・薬" : "スキンケア用品を変えた";
+    : ["塗り薬", "サプリ", "飲み薬"].includes(category) ? "皮膚科・薬" : "スキンケア用品を変えた";
 
 // ボタンにする項目の初期値。アプリの設定から追加・削除でき、settings テーブルに保存される
 const DEFAULT_ITEMS = {
@@ -103,10 +103,8 @@ async function state(env, url) {
     .bind(date).all()).results;
   for (const r of changed)
     for (const c of JSON.parse(r.body).changes || []) last_changes[c.kind] ??= r.date;
-  // この日に使っていた製品 (記録タブに表示する)
-  const products = (await allProducts(env))
-    .filter((x) => (!x.started || x.started <= date) && (!x.ended || x.ended >= date))
-    .map(({ id, name, category, care_item }) => ({ id, name, category, care_item }));
+  // 記録タブで製品のボタンを出すための一覧 (使用期間での絞り込みは画面側で行う)
+  const products = (await allProducts(env)).map(({ id, name, category, started, ended }) => ({ id, name, category, started, ended }));
   return json({
     today, date,
     entry: await entryOf(env, date),
@@ -200,7 +198,7 @@ async function createProduct(env, request) {
   if (!name || !PRODUCT_CATEGORIES.includes(b.category)) return json({ error: "bad product" }, { status: 400 });
   const started = b.started && isDate(b.started) && b.started <= jstDate() ? b.started : null;
   const p = {
-    id: crypto.randomUUID(), name, category: b.category, care_item: text(b.care_item, 30) || null,
+    id: crypto.randomUUID(), name, category: b.category,
     started, ended: null, status: "pending", mode: "search",
     ingredients_text: "", ingredients: [], flags: [], summary: "", matched_name: "", sources: [], note: "",
     created_at: new Date().toISOString(), checked_at: null,
@@ -227,7 +225,6 @@ async function updateProduct(env, request, id) {
   if (!p) return json({ error: "not found" }, { status: 404 });
   const b = await request.json();
   if ("ended" in b) p.ended = b.ended && isDate(b.ended) ? b.ended : null;
-  if ("care_item" in b) p.care_item = text(b.care_item, 30) || null;
   if ("started" in b) p.started = b.started && isDate(b.started) ? b.started : null;
   if (b.name && text(b.name, 80) !== p.name) {
     p.name = text(b.name, 80);

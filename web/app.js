@@ -32,6 +32,13 @@ const ACNE_AREAS = {
 };
 const BODY_AREAS = ["scalp", "neck", "chest", "back"];
 
+// 登録した製品の数え方。顔に使うもの・飲むものは記録タブで使った日に選び、髪・体・洗濯は使用期間中は毎日使ったとみなす
+const ALWAYS_USED = ["シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤"];
+const INTAKE = ["サプリ", "飲み薬"];
+const productKind = (p) => (ALWAYS_USED.includes(p.category) ? "always" : INTAKE.includes(p.category) ? "intake" : "face");
+// 製品の種類と、スキンケアの種類ボタンの対応。製品を登録した種類のボタンは製品のボタンに置き換える
+const CARE_ITEM_FOR = { ひげ剃りフォーム: "ひげ剃り", クレンジング: "洗顔", 保湿クリーム: "保湿クリーム", 塗り薬: "薬・塗り薬" };
+
 const emptyEntry = () => ({
   skin: null,
   skin_detail: [],
@@ -39,6 +46,8 @@ const emptyEntry = () => ({
   acne: {},
   acne_types: [],
   care: { am: [], pm: [] },
+  products: { am: [], pm: [] }, // 使った製品の id (顔に使うもの)
+  supplements: [], // 飲んだサプリ・薬の id
   food: [],
   sleep: null,
   stress: null,
@@ -52,7 +61,8 @@ const emptyEntry = () => ({
 const normalize = (e) => {
   const base = emptyEntry();
   if (!e) return base;
-  return { ...base, ...e, itch: { ...base.itch, ...e.itch }, care: { ...base.care, ...e.care }, acne: { ...e.acne } };
+  return { ...base, ...e, itch: { ...base.itch, ...e.itch }, care: { ...base.care, ...e.care },
+    products: { ...base.products, ...e.products }, acne: { ...e.acne } };
 };
 
 const acneTotal = (e) => Object.values(e?.acne || {}).reduce((s, n) => s + n, 0);
@@ -65,7 +75,7 @@ let date = null; // 記録タブで表示している日付
 let entry = null;
 let prev = null; // 直前の記録 (コピー用)
 let lastChanges = {}; // 変えたことの種類ごとの、表示中の日より前で最後の日付
-let usedProducts = []; // 表示中の日に使っていた製品 (スキンケア欄に表示)
+let allProducts = []; // 登録した製品 (記録タブのボタン用。id, name, category, started, ended)
 let items = null; // { care: [], food: [] }
 let vapidPublicKey = null;
 let reportCache = null;
@@ -204,7 +214,17 @@ function renderRecord() {
   const e = entry;
   const acneN = acneTotal(e);
   const itchOpen = (e.itch.level ?? 0) > 0;
-  const canCopy = prev && (prev.entry.care?.am?.length || prev.entry.care?.pm?.length);
+  const pe = prev && normalize(prev.entry);
+  const canCopy = pe && [pe.care.am, pe.care.pm, pe.products.am, pe.products.pm, pe.supplements].some((x) => x.length);
+  // その日に使える製品 (使用期間中のもの + その日にすでに選んでいたもの)
+  const chosen = new Set([...e.products.am, ...e.products.pm, ...e.supplements]);
+  const shown = allProducts.filter((p) => chosen.has(p.id) ||
+    ((!p.started || p.started <= date) && (!p.ended || p.ended >= date)));
+  const face = shown.filter((p) => productKind(p) === "face");
+  const intake = shown.filter((p) => productKind(p) === "intake");
+  const always = shown.filter((p) => productKind(p) === "always" && !p.ended);
+  const covered = new Set(face.map((p) => (items.care.includes(p.category) ? p.category : CARE_ITEM_FOR[p.category])));
+  const careFor = (sel) => items.care.filter((c) => !covered.has(c) || sel.includes(c));
 
   main.innerHTML = `<div class="record">
     ${card("肌の調子", `${seg("skin", SKIN, e.skin, { offset: 1 })}
@@ -223,12 +243,14 @@ function renderRecord() {
       ${acneN ? `<p class="sub">どんなニキビ？</p>${chips("acne_types", ACNE_TYPES, e.acne_types)}` : ""}`,
       { note: acneN ? `${acneN}個` : "なし" })}
 
-    ${card("スキンケア", `<p class="sub">朝</p>${chips("care.am", items.care, e.care.am, { add: true })}
-      <p class="sub">夜</p>${chips("care.pm", items.care, e.care.pm, { add: true })}
+    ${card("スキンケア", `<p class="sub">朝</p>${productChips("products.am", face, e.products.am)}${chips("care.am", careFor(e.care.am), e.care.am, { add: true })}
+      <p class="sub">夜</p>${productChips("products.pm", face, e.products.pm)}${chips("care.pm", careFor(e.care.pm), e.care.pm, { add: true })}
       ${canCopy ? `<button class="link-btn" id="copy-care">前回（${esc(dateLabel(prev.date))}）と同じにする</button>` : ""}
-      ${usedProducts.length ? `<p class="hint">使っている製品: ${usedProducts.map((x) =>
-        `${esc(x.name)}${x.care_item ? `（${esc(x.care_item)}）` : ""}`).join(" · ")}</p>`
-        : `<p class="hint">化粧品タブで製品を登録すると、成分まで分析できます。</p>`}`)}
+      <p class="hint">${face.length ? "◆ は化粧品タブで登録した製品です。" : "化粧品タブで製品を登録すると、製品ごとのボタンが出て成分まで分析できます。"}
+        ${always.length ? `毎日使っているもの: ${always.map((p) => esc(p.name)).join(" · ")}` : ""}</p>`)}
+
+    ${card("飲んだもの（サプリ・薬）", intake.length ? productChips("supplements", intake, e.supplements)
+      : `<p class="hint">化粧品タブで種類を「サプリ」「飲み薬」にして登録すると、ここにボタンが出ます。</p>`)}
 
     ${changesCard(e)}
 
@@ -247,6 +269,13 @@ function renderRecord() {
 
     ${card("メモ", `<textarea id="memo" rows="3" placeholder="気づいたこと（新しい化粧品、外出先、体調など）">${esc(e.memo)}</textarea>`)}
   </div>`;
+}
+
+// 登録した製品のボタン (値は製品の id)
+function productChips(group, list, selected) {
+  if (!list.length) return "";
+  return `<div class="chips product-chips" data-group="${group}">${list.map((p) =>
+    `<button class="chip ${selected.includes(p.id) ? "on" : ""}" data-v="${esc(p.id)}">${esc(p.name)}</button>`).join("")}</div>`;
 }
 
 function changesCard(e) {
@@ -371,7 +400,10 @@ function onRecordClick(e) {
     return scheduleSave();
   }
   if (t.id === "copy-care") {
-    entry.care = { am: [...(prev.entry.care?.am || [])], pm: [...(prev.entry.care?.pm || [])] };
+    const pe = normalize(prev.entry);
+    entry.care = { am: [...pe.care.am], pm: [...pe.care.pm] };
+    entry.products = { am: [...pe.products.am], pm: [...pe.products.pm] };
+    entry.supplements = [...pe.supplements];
     renderRecord();
     return scheduleSave();
   }
@@ -405,7 +437,7 @@ async function loadDay(d) {
   vapidPublicKey = s.vapidPublicKey;
   prev = s.prev;
   lastChanges = s.last_changes || {};
-  usedProducts = s.products || [];
+  allProducts = s.products || [];
   entry = normalize(s.entry);
   if (tab === "record") renderRecord();
 }

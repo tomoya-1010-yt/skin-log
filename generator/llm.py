@@ -117,6 +117,21 @@ FLAG_RULES = """## 成分チェック (flags と summary)
   多くの人には問題なく使える成分でも、人によって合わないことがある、という前提で書く。"""
 
 
+SUPPLEMENT_RULES = """## サプリ・飲み薬の場合
+- ingredients には原材料名と栄養成分 (分かれば1日量あたりの含有量も、例:「パントテン酸 500mg」) を書く。
+  医薬品は有効成分 (含有量つき) を先に、添加物をあとに書く。
+- flags は肌との関係が知られているものだけ (多くても5個):
+  - ニキビ: ニキビが悪化することがあると報告されているもの (ヨウ素、高用量のビタミンB12、ホエイプロテインなど)
+  - かぶれ: 発疹などの皮膚の副作用が知られているもの (医薬品は添付文書に皮膚の副作用の記載があるもの)
+  - 刺激・乾燥: 当てはまるものがあれば (例: 高用量のビタミンAによる乾燥)
+- summary には、肌に関係する作用がよく言われているもの (例: パントテン酸と皮脂) があれば、
+  根拠の強さ (研究が少ない、など) とあわせて1〜2文で書く。効果を言い切らない。"""
+
+
+def _rules_for(product):
+    return SUPPLEMENT_RULES if product["category"] in stats.INTAKE else ""
+
+
 def lookup_product(product):
     """商品名から Web で全成分を調べ、成分チェックもする。
 
@@ -144,6 +159,8 @@ def lookup_product(product):
 - matched_name: 見つかった商品の正式な名前。
 
 {FLAG_RULES}
+
+{_rules_for(product)}
 """
     output, tool_texts = _claude(prompt, PRODUCT_SCHEMA, effort="medium", tools="WebSearch,WebFetch",
                                  max_turns=15, with_tool_texts=True, system=PRODUCT_SYSTEM)
@@ -174,6 +191,8 @@ def check_ingredients(product):
 - note: 書き写しに明らかな誤りや抜けがありそうなら書く。なければ空文字
 
 {FLAG_RULES}
+
+{_rules_for(product)}
 """
     return _claude(prompt, PRODUCT_SCHEMA, effort="medium", system=PRODUCT_SYSTEM)
 
@@ -255,9 +274,12 @@ def _product_lines(products):
         return "(登録なし)"
     lines = []
     for p in products:
-        period = f"{p.get('started') or '以前'}〜{p.get('ended') or '使用中'}"
-        link = f"・「{p['care_item']}」ボタンを押した日に使用" if p.get("care_item") else ""
-        head = f"- {p['name']} ({p['category']}・{period}{link})"
+        if p["category"] in stats.ALWAYS_USED:
+            how = f"{p.get('started') or '以前'}〜{p.get('ended') or '使用中'}・期間中は毎日使用"
+        else:
+            how = f"{'飲んだ' if p['category'] in stats.INTAKE else '使った'}日を記録で選ぶ"
+            how += f"・{p['ended']}にやめた" if p.get("ended") else ""
+        head = f"- {p['name']} ({p['category']}・{how})"
         if not p.get("ingredients"):
             lines.append(f"{head}: 成分は未確認")
             continue
@@ -349,6 +371,8 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
     必要に応じて reason に書く。
   - 製品が原因の候補になるときは suspects にも入れ、actions では商品名ではなく「エタノール・香料の入っていない化粧水を
     2週間試す」のように成分の条件ですすめる。
+  - サプリ・飲み薬も同じように見てよい。ただし飲み薬は医師に処方されている可能性があるので、やめる・減らすようには
+    すすめず、気になる場合は処方した医師や薬剤師に相談するよう書く。サプリの効果は言い切らない。
 - 記録が少ない場合は、その分だけ断定を避けて短く書く。
 - 文体は「です・ます」。1項目は長くても60字程度。専門用語は避ける。
 """

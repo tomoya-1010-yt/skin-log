@@ -165,6 +165,11 @@ h1 { font-size: 18px; margin: 0; letter-spacing: .02em; white-space: nowrap; }
 }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .chip.add { border-style: dashed; color: var(--muted); }
+/* 化粧品タブで登録した製品のボタン (種類のボタンと見分けやすくする) */
+.product-chips { margin-bottom: 6px; }
+.product-chips .chip { border-color: var(--accent); border-style: solid; color: var(--text); }
+.product-chips .chip::before { content: "◆ "; color: var(--accent); font-size: 10px; }
+.product-chips .chip.on::before { color: inherit; }
 .body-areas { margin-top: 6px; justify-content: center; }
 .body-areas .chip.on { background: var(--acne-soft); border-color: var(--acne); color: var(--acne); }
 .chips.edit .chip span { color: var(--muted); font-size: 11px; margin-left: 2px; }

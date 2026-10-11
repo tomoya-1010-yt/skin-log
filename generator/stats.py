@@ -139,25 +139,35 @@ def active(p, d):
     return (not p.get("started") or p["started"] <= d) and (not p.get("ended") or p["ended"] >= d)
 
 
-def products_used(e, d, products):
-    """その日に使った製品 (名前の集合) と、使ったか分からない製品があったか。
+ALWAYS_USED = {"シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤"}
+INTAKE = {"サプリ", "飲み薬"}
 
-    スキンケアのボタンと結びつけた製品は、その日そのボタンを押したときだけ使ったとみなす。
-    スキンケアを1つも記録していない日は、ボタンと結びつけた製品は不明扱い。
+
+def selected_ids(e):
+    """記録タブで選んだ製品 (顔に使うもの・飲んだもの) の id。"""
+    prods = e.get("products") or {}
+    return set(prods.get("am") or []) | set(prods.get("pm") or []) | set(e.get("supplements") or [])
+
+
+def products_used(e, d, products):
+    """その日に使った製品 (名前の集合) と、使ったか分からない製品。
+
+    髪・体・洗濯のものは使用期間中は毎日使ったとみなす。
+    顔に使うもの・飲むものは記録タブで選んだ日だけ使ったとみなす。
+    スキンケアも製品も1つも記録していない日は、選ぶ製品は不明扱い (記録し忘れと区別できないため)。
     """
     care = e.get("care") or {}
-    pressed = set(care.get("am") or []) | set(care.get("pm") or [])
+    chosen = selected_ids(e)
+    recorded = bool(chosen or care.get("am") or care.get("pm"))
     used, unknown = set(), set()
     for p in products:
-        if not active(p, d):
-            continue
-        if p.get("care_item"):
-            if not pressed:
-                unknown.add(p["name"])
-            elif p["care_item"] in pressed:
+        if p["category"] in ALWAYS_USED:
+            if active(p, d):
                 used.add(p["name"])
-        else:
+        elif p["id"] in chosen:
             used.add(p["name"])
+        elif not recorded and active(p, d):
+            unknown.add(p["name"])
     return used, unknown
 
 
