@@ -32,7 +32,11 @@ jobs:
       - run: pip install -r requirements.txt
       - name: 調査待ちの件数
         id: pending
-        run: echo "count=$(python generator/main.py products --count | tail -n 1)" >> "$GITHUB_OUTPUT"
+        # 失敗したらここで止める (件数の取得に失敗したまま Claude を動かさない)
+        run: |
+          count=$(python generator/main.py products --count)
+          echo "調査待ち: $count 件"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
       - name: Claude Code をインストール
         if: steps.pending.outputs.count != '0'
         run: |
