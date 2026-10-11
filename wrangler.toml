@@ -5,7 +5,7 @@ compatibility_date = "2026-09-01"
 
 [vars]
 # scripts/gen_vapid.py で作った公開鍵 (公開してよい値)
-VAPID_PUBLIC_KEY = ""
+VAPID_PUBLIC_KEY = "BPTzECATLMbK32O-6Tjpe6iIhLwxLoWg0R3KN1ArJdtbH7PLNPMpFJ_2MeFJaN9sUl3DTttx04Dp7o4J8hOWv-A"
 
 [[d1_databases]]
 binding = "DB"
