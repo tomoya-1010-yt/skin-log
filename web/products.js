@@ -9,6 +9,33 @@ const KIND_HINT = {
 };
 
 let products = null; // { products: [...], categories: [...] }
+const POLL_MS = 60 * 1000;
+
+// 次に成分の調査が動く時刻 (7〜23時の毎時17分。GitHub Actions は数分遅れることがある)
+function nextRunLabel() {
+  const now = new Date(Date.now() + 9 * 3600 * 1000); // 日本時間を UTC の値として扱う
+  let h = now.getUTCHours() + (now.getUTCMinutes() >= 17 ? 1 : 0);
+  if (h < 7) h = 7;
+  return h > 23 ? "明日の 7:17ごろ" : `${h}:17ごろ`;
+}
+
+// 調査中の製品があるあいだ、化粧品タブを開いていれば1分ごとに読み直す
+setInterval(async () => {
+  if (tab !== "products" || document.visibilityState !== "visible" || !products) return;
+  if (productView.mode === "add" || !products.products.some((p) => p.status === "pending")) return;
+  const before = JSON.stringify(products.products.map((p) => [p.id, p.status, p.updated_at]));
+  try {
+    await loadProducts();
+  } catch {
+    return;
+  }
+  if (tab !== "products" || productView.mode === "add") return;
+  if (JSON.stringify(products.products.map((p) => [p.id, p.status, p.updated_at])) === before) return;
+  if (productView.mode === "detail" && document.activeElement?.id === "ing-text") return; // 入力中は書き換えない
+  const y = window.scrollY;
+  renderProducts();
+  window.scrollTo(0, y);
+}, POLL_MS);
 let productView = { mode: "list", id: null }; // list | add | detail
 
 async function loadProducts() {
@@ -41,6 +68,8 @@ function renderProductList() {
       Claude が成分を調べ、週次レポートで記録と照らし合わせます。</p>`}
     ${using.length ? `<h2 class="group">使用中</h2><div class="plist">${using.map(productRow).join("")}</div>` : ""}
     ${past.length ? `<h2 class="group">使うのをやめた</h2><div class="plist">${past.map(productRow).join("")}</div>` : ""}
+    ${list.some((p) => p.status === "pending") ? `<p class="hint center">調査中の製品は、次の調査（${nextRunLabel()}、1回3件まで）で調べます。
+      この画面を開いていれば、結果が出しだい自動で表示が変わります。</p>` : ""}
   </div>`;
 }
 
@@ -111,7 +140,7 @@ function renderProductDetail() {
   let result = "";
   if (p.status === "pending") {
     result = `<p class="muted">${p.mode === "manual" ? "貼り付けた成分を" : "Claude が Web で全成分を"}調べています。
-      1時間以内（7〜23時）に結果が出ます。</p>`;
+      次の調査は${nextRunLabel()}です（1回3件まで）。この画面を開いていれば、結果が出しだい自動で表示が変わります。</p>`;
   } else {
     result = `${p.status === "not_found" ? `<p class="warn-text">全成分を確認できませんでした。${esc(p.note)}</p>` : ""}
       ${p.summary ? `<p>${esc(p.summary)}</p>` : ""}

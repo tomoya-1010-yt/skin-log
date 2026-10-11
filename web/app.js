@@ -557,61 +557,90 @@ $("#next-day").addEventListener("click", () => {
 // ---------- 履歴タブ ----------
 
 const SKIN_CLASS = ["", "s1", "s2", "s3", "s4", "s5"];
+let historyData = null; // { today, byDate }
+let historyMonth = null; // 表示中の月 (YYYY-MM)
+
+const monthLabel = (m) => `${Number(m.slice(0, 4))}年${Number(m.slice(5))}月`;
+const shiftMonth = (m, n) => {
+  const d = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)) - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+};
 
 async function renderHistory() {
   setHeader("履歴");
-  main.innerHTML = `<p class="empty">読み込み中…</p>`;
-  const h = await api("/api/history?days=60");
+  if (!historyData) {
+    main.innerHTML = `<p class="empty">読み込み中…</p>`;
+    const h = await api("/api/history?days=400");
+    historyData = { today: h.today, byDate: Object.fromEntries(h.entries.map((r) => [r.date, normalize(r.entry)])) };
+  }
   if (tab !== "history") return;
-  const byDate = Object.fromEntries(h.entries.map((r) => [r.date, normalize(r.entry)]));
-  const days = [];
-  for (let i = 0; i < 60; i++) days.push(shiftDate(h.today, -i));
+  const { today: t, byDate } = historyData;
+  historyMonth ??= t.slice(0, 7);
+  const m = historyMonth;
+  const first = `${m}-01`;
+  const startDow = new Date(first + "T00:00:00Z").getUTCDay();
+  const daysInMonth = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 0)).getUTCDate();
+  const oldest = shiftDate(t, -399).slice(0, 7);
 
-  // 直近30日の肌の調子 (左が古い)
-  const last30 = days.slice(0, 30).reverse();
-  const bars = last30.map((d, i) => {
-    const s = byDate[d]?.skin;
-    const x = i * 10 + 1;
-    if (!s) return `<rect class="bar none" x="${x}" y="58" width="8" height="2" rx="1"/>`;
-    const hgt = s * 11;
-    return `<rect class="bar ${SKIN_CLASS[s]}" x="${x}" y="${60 - hgt}" width="8" height="${hgt}" rx="2"><title>${dateLabel(d)} ${SKIN[s - 1]}</title></rect>`;
-  }).join("");
-  const recorded = days.slice(0, 30).filter((d) => byDate[d]).length;
-
-  const rows = days.map((d) => {
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(`<span class="cal-cell blank"></span>`);
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = `${m}-${String(day).padStart(2, "0")}`;
     const e = byDate[d];
-    if (!e) return `<button class="hrow missing" data-date="${d}"><span class="d">${dateLabel(d)}</span><span class="t">未記録</span></button>`;
-    const tags = [];
-    if (e.itch.level > 0) tags.push(`かゆみ${["", "少し", "中", "強"][e.itch.level]}`);
-    const n = acneTotal(e);
-    if (n) tags.push(`ニキビ ${n}`);
-    if (e.sleep != null) tags.push(`睡眠 ${e.sleep}h`);
-    if (e.alcohol > 0) tags.push(`お酒 ${ALCOHOL[e.alcohol]}`);
-    if (e.stress >= 4) tags.push(`ストレス ${STRESS[e.stress - 1]}`);
-    if (e.skin_detail.length) tags.unshift(e.skin_detail.join("・"));
-    for (const c of e.changes) tags.unshift(`◆${c.kind}`);
-    return `<button class="hrow" data-date="${d}">
-      <span class="d">${dateLabel(d)}</span>
-      <span class="score ${SKIN_CLASS[e.skin] || "none"}">${e.skin ? SKIN[e.skin - 1] : "–"}</span>
-      <span class="t">${tags.map(esc).join(" · ")}</span></button>`;
-  }).join("");
+    if (d > t) {
+      cells.push(`<span class="cal-cell future"><span class="num">${day}</span></span>`);
+      continue;
+    }
+    const marks = e ? `${acneTotal(e) ? `<i class="mk acne" title="ニキビ"></i>` : ""}${e.itch.level >= 2 ? `<i class="mk itch" title="かゆみ"></i>` : ""}${e.changes.length ? `<i class="mk change" title="変えたこと"></i>` : ""}` : "";
+    const cls = !e ? "missing" : e.skin ? SKIN_CLASS[e.skin] : "noskin";
+    cells.push(`<button class="cal-cell ${cls} ${d === t ? "today" : ""}" data-date="${d}"
+      aria-label="${dateLabel(d)} ${e ? (e.skin ? SKIN[e.skin - 1] : "記録あり") : "未記録"}">
+      <span class="num">${day}</span><span class="mks">${marks}</span></button>`);
+  }
 
-  main.innerHTML = `<section class="card">
-      <h2>肌の調子（30日）<span class="note">記録 ${recorded}日</span></h2>
-      <svg class="chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="直近30日の肌の調子">${bars}</svg>
-      <div class="chart-axis"><span>${dateLabel(last30[0])}</span><span>今日</span></div>
+  // この月の数字
+  const inMonth = Object.entries(byDate).filter(([d]) => d.startsWith(m)).map(([, e]) => e);
+  const pastDays = m === t.slice(0, 7) ? Number(t.slice(8)) : daysInMonth;
+  const skins = inMonth.map((e) => e.skin).filter(Boolean);
+  const avg = skins.length ? (skins.reduce((a, b) => a + b, 0) / skins.length).toFixed(1) : "–";
+  const acne = inMonth.reduce((a, e) => a + acneTotal(e), 0);
+  const itchDays = inMonth.filter((e) => e.itch.level >= 2).length;
+
+  main.innerHTML = `<section class="card cal-card">
+      <div class="cal-nav">
+        <button class="nav-btn" data-month="-1" aria-label="前の月" ${m <= oldest ? "disabled" : ""}>‹</button>
+        <b>${monthLabel(m)}</b>
+        <button class="nav-btn" data-month="1" aria-label="次の月" ${m >= t.slice(0, 7) ? "disabled" : ""}>›</button>
+      </div>
+      <div class="cal-grid">${[..."日月火水木金土"].map((w) => `<span class="cal-dow">${w}</span>`).join("")}${cells.join("")}</div>
+      <div class="cal-legend">
+        ${SKIN.map((l, i) => `<span><i class="sw ${SKIN_CLASS[i + 1]}"></i>${l}</span>`).join("")}
+        <span><i class="sw missing"></i>未記録</span>
+        <span><i class="mk acne"></i>ニキビ</span><span><i class="mk itch"></i>かゆい</span><span><i class="mk change"></i>変えたこと</span>
+      </div>
     </section>
-    <div class="hlist">${rows}</div>`;
+    <div class="tiles">
+      <div class="tile"><span>記録した日</span><b>${inMonth.length}<small>/ ${pastDays}日</small></b></div>
+      <div class="tile"><span>肌の調子（平均）</span><b>${avg}</b></div>
+      <div class="tile"><span>新しいニキビ</span><b>${acne}<small>個</small></b></div>
+      <div class="tile"><span>かゆかった日</span><b>${itchDays}<small>日</small></b></div>
+    </div>
+    <p class="hint center">日付をタップすると、その日の記録を開きます。</p>`;
 }
 
 main.addEventListener("click", (e) => {
   if (tab !== "history") return;
-  const row = e.target.closest(".hrow");
-  if (!row) return;
+  const nav = e.target.closest("[data-month]");
+  if (nav) {
+    historyMonth = shiftMonth(historyMonth, Number(nav.dataset.month));
+    return renderHistory();
+  }
+  const cell = e.target.closest(".cal-cell[data-date]");
+  if (!cell) return;
   tab = "record";
   history.replaceState(null, "", "#record");
   updateTabs();
-  guard(loadDay(row.dataset.date).then(() => window.scrollTo(0, 0)));
+  guard(loadDay(cell.dataset.date).then(() => window.scrollTo(0, 0)));
 });
 
 // ---------- レポートタブ ----------
@@ -628,6 +657,12 @@ function diffText(now, before, unit = "") {
 function reportHtml(r) {
   const w = r.week;
   const ai = r.ai;
+  // 先頭に出す要点: 受診のすすめ > 来週ためすこと > おすすめアクション (合わせて3つまで)
+  const todo = [
+    ...(ai.see_doctor ? [["受診", "皮膚科の受診を検討する"]] : []),
+    ...(ai.experiment?.action ? [["ためす", ai.experiment.action]] : []),
+    ...(ai.actions || []).map((a) => ["する", a.action]),
+  ].slice(0, 3);
   const tiles = [
     ["記録した日", `${w.days_recorded}<small>/ 7日</small>`],
     ["肌の調子（平均）", diffText(w.skin_avg, w.skin_avg_prev)],
@@ -650,6 +685,9 @@ function reportHtml(r) {
         : `<p>まだ記録が少ないので経過を見ています</p>`}</li>`).join("");
   return `<div class="report">
     <p class="period">${esc(dateLabel(r.period.from))} 〜 ${esc(dateLabel(r.period.to))}</p>
+    ${todo.length ? `<section class="card todo-card"><h2>今週やること</h2><ol class="todo">${todo.map(([kind, text]) =>
+      `<li><span class="todo-kind">${kind}</span>${esc(text)}</li>`).join("")}</ol>
+      <p class="hint">理由や詳しい内容は下にあります。</p></section>` : ""}
     <div class="tiles">${tiles.map(([k, v]) => `<div class="tile"><span>${k}</span><b>${v}</b></div>`).join("")}</div>
     ${areas.length ? `<p class="areas">ニキビの場所: ${areas.map(([a, n]) => `${esc(ACNE_AREAS[a] || a)} ${n}`).join(" · ")}</p>` : ""}
     ${counts(w.acne_type_days) ? `<p class="areas">ニキビの種類: ${counts(w.acne_type_days)}</p>` : ""}
@@ -795,7 +833,10 @@ async function selectTab(name) {
     if (date !== today) return loadDay();
     return renderRecord();
   }
-  if (name === "history") return renderHistory();
+  if (name === "history") {
+    historyData = null;
+    return renderHistory();
+  }
   if (name === "report") return renderReport();
   if (name === "products") {
     products = null; // 調査の結果が出ているかもしれないので毎回取り直す

@@ -216,36 +216,6 @@ textarea {
   resize: vertical;
 }
 
-/* ---------- 履歴 ---------- */
-.chart { display: block; width: 100%; height: 72px; }
-.chart .bar.none { fill: var(--line); }
-.chart .s1 { fill: var(--s1); } .chart .s2 { fill: var(--s2); } .chart .s3 { fill: var(--s3); }
-.chart .s4 { fill: var(--s4); } .chart .s5 { fill: var(--s5); }
-.chart-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
-.hlist { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.hrow {
-  display: grid;
-  grid-template-columns: 7.5em 5.5em 1fr;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  background: none;
-  padding: 10px 12px;
-  font-size: 14px;
-}
-.hrow:last-child { border-bottom: none; }
-.hrow .d { color: var(--sub); font-variant-numeric: tabular-nums; }
-.hrow .t { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hrow.missing { grid-template-columns: 7.5em 1fr; }
-.hrow.missing .d { color: var(--muted); }
-.score { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 8px; text-align: center; color: #fff; white-space: nowrap; }
-.score.none { background: var(--line); color: var(--muted); }
-.score.s1 { background: var(--s1); } .score.s2 { background: var(--s2); } .score.s3 { background: var(--s3); }
-.score.s4 { background: var(--s4); } .score.s5 { background: var(--s5); }
-
 /* ---------- レポート ---------- */
 .picker {
   width: 100%;
@@ -464,3 +434,51 @@ label.btn { cursor: pointer; text-align: center; }
 .rhead-btn .ttl + .chev { margin-left: auto; }
 .none-chip { border-style: dashed; }
 .none-chip.on { border-style: solid; background: var(--line); border-color: var(--muted); color: var(--text); font-weight: 600; }
+
+/* 履歴: カレンダー */
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cal-nav b { font-size: 16px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-dow { text-align: center; font-size: 11px; color: var(--muted); padding-bottom: 2px; }
+.cal-dow:first-child { color: var(--acne); }
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--bg);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text);
+}
+.cal-cell.blank { background: none; }
+.cal-cell.future { background: none; color: var(--muted); opacity: .5; }
+.cal-cell.missing { border: 1px dashed var(--line); background: none; color: var(--muted); }
+.cal-cell.noskin { background: var(--line); }
+.cal-cell.s1, .sw.s1 { background: var(--s1); }
+.cal-cell.s2, .sw.s2 { background: var(--s2); }
+.cal-cell.s3, .sw.s3 { background: var(--s3); }
+.cal-cell.s4, .sw.s4 { background: var(--s4); }
+.cal-cell.s5, .sw.s5 { background: var(--s5); }
+.cal-cell.s1, .cal-cell.s2, .cal-cell.s3, .cal-cell.s4, .cal-cell.s5 { color: #fff; font-weight: 600; }
+.cal-cell.today { outline: 2px solid var(--text); outline-offset: 1px; }
+.cal-cell .mks { display: flex; gap: 2px; height: 6px; margin-top: 2px; }
+.mk { display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid var(--card); }
+.mk.acne { background: var(--acne); }
+.mk.itch { background: var(--warn); }
+.mk.change { background: var(--accent); border-radius: 1px; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.sw.missing { border: 1px dashed var(--muted); }
+
+/* レポート: 今週やること */
+.todo-card { border-color: var(--accent); }
+.todo { margin: 0; padding: 0; list-style: none; counter-reset: todo; }
+.todo li { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-weight: 600; font-size: 15px; }
+.todo li:first-child { border-top: none; padding-top: 0; }
+.todo-kind { flex: none; font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 7px; }
