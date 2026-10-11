@@ -65,9 +65,6 @@ let date = null; // 記録タブで表示している日付
 let entry = null;
 let prev = null; // 直前の記録 (コピー用)
 let lastChanges = {}; // 変えたことの種類ごとの、表示中の日より前で最後の日付
-let photo = null; // 表示中の日の顔写真 { date, uploaded_at }
-let prevPhoto = null; // それより前で最後の顔写真 (構図をそろえる見本)
-let photoBusy = false;
 let usedProducts = []; // 表示中の日に使っていた製品 (スキンケア欄に表示)
 let items = null; // { care: [], food: [] }
 let vapidPublicKey = null;
@@ -246,73 +243,8 @@ function renderRecord() {
     ${card("運動", seg("exercise", EXERCISE, e.exercise, { hints: EXERCISE_HINT }))}
 
     ${card("メモ", `<textarea id="memo" rows="3" placeholder="気づいたこと（新しい化粧品、外出先、体調など）">${esc(e.memo)}</textarea>`)}
-
-    ${photoCard()}
   </div>`;
 }
-
-// ---------- 顔写真 ----------
-
-const photoUrl = (p) => `/api/photo?date=${p.date}&v=${encodeURIComponent(p.uploaded_at)}`;
-const isSunday = (d) => new Date(d + "T00:00:00Z").getUTCDay() === 0;
-
-function photoCard() {
-  const note = photo ? "撮影済み" : isSunday(date) ? "今日は写真の日" : "週1回（日曜）でOK";
-  const body = photo
-    ? `<img class="photo" src="${photoUrl(photo)}" alt="${esc(dateLabel(date))}の顔写真">
-      <div class="photo-actions">
-        <label class="btn ghost">撮り直す<input type="file" accept="image/*" capture="user" data-photo hidden></label>
-        <button class="btn ghost danger" id="photo-delete">削除</button>
-      </div>`
-    : `<div class="photo-guide">
-        ${prevPhoto ? `<figure><img src="${photoUrl(prevPhoto)}" alt="前回の顔写真"><figcaption>前回 ${esc(dateLabel(prevPhoto.date))}<br>この構図にそろえる</figcaption></figure>` : ""}
-        <ul>
-          <li>正面を向き、腕を伸ばした距離で</li>
-          <li>いつも同じ場所・同じ明るさ（昼の窓際など）</li>
-          <li>前髪を上げ、あごまで入れる</li>
-        </ul>
-      </div>
-      <label class="btn ${photoBusy ? "disabled" : ""}">${photoBusy ? "送信中…" : "撮影する"}<input type="file" accept="image/*" capture="user" data-photo hidden ${photoBusy ? "disabled" : ""}></label>`;
-  return `<section class="card" id="photo-card"><h2>顔写真<span class="note">${note}</span></h2>${body}
-    <p class="hint">週次レポートで、前回の写真と比べて見た目の変化を Claude が説明します。写真は合言葉で守られ、設定からいつでも全部消せます。</p></section>`;
-}
-
-// 端末で縮小して JPEG にしてから送る (長辺 1280px、300KB 前後)
-async function shrink(file, max = 1280) {
-  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
-  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  bmp.close?.();
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("画像を変換できませんでした"))), "image/jpeg", 0.85));
-}
-
-async function uploadPhoto(file) {
-  const d = date;
-  photoBusy = true;
-  renderRecord();
-  try {
-    const blob = await shrink(file);
-    const res = await fetch(`/api/photo?date=${d}`, { method: "PUT", headers: { "content-type": "image/jpeg" }, body: blob });
-    if (res.status === 401) throw new LoginRequired();
-    if (!res.ok) throw new Error(`${res.status}`);
-    if (d === date) photo = (await res.json()).photo;
-    setSaveStatus("写真を保存しました ✓", "ok");
-  } catch (err) {
-    photoBusy = false;
-    if (err instanceof LoginRequired) return renderLogin("もう一度合言葉を入力してください");
-    alert("写真を保存できませんでした: " + err.message);
-  }
-  photoBusy = false;
-  if (tab === "record" && d === date) renderRecord();
-}
-
-main.addEventListener("change", (e) => {
-  if (tab === "record" && e.target.matches("[data-photo]") && e.target.files[0]) uploadPhoto(e.target.files[0]);
-});
 
 function changesCard(e) {
   const on = (k) => e.changes.find((c) => c.kind === k);
@@ -389,14 +321,6 @@ async function addItem(group) {
 
 function onRecordClick(e) {
   const t = e.target;
-  if (t.id === "photo-delete") {
-    if (!confirm("この日の写真を削除しますか？")) return;
-    const d = date;
-    return guard(api(`/api/photo?date=${d}`, { method: "DELETE" }).then(() => {
-      if (d === date) photo = null;
-      if (tab === "record") renderRecord();
-    }));
-  }
   const area = t.closest("[data-area]");
   if (area) {
     const id = area.dataset.area;
@@ -478,9 +402,7 @@ async function loadDay(d) {
   vapidPublicKey = s.vapidPublicKey;
   prev = s.prev;
   lastChanges = s.last_changes || {};
-  photo = s.photo;
   usedProducts = s.products || [];
-  prevPhoto = s.prev_photo;
   entry = normalize(s.entry);
   if (tab === "record") renderRecord();
 }
@@ -500,7 +422,6 @@ async function renderHistory() {
   const h = await api("/api/history?days=60");
   if (tab !== "history") return;
   const byDate = Object.fromEntries(h.entries.map((r) => [r.date, normalize(r.entry)]));
-  const photoDays = new Set(h.photos || []);
   const days = [];
   for (let i = 0; i < 60; i++) days.push(shiftDate(h.today, -i));
 
@@ -527,7 +448,6 @@ async function renderHistory() {
     if (e.stress >= 4) tags.push(`ストレス ${STRESS[e.stress - 1]}`);
     if (e.skin_detail.length) tags.unshift(e.skin_detail.join("・"));
     for (const c of e.changes) tags.unshift(`◆${c.kind}`);
-    if (photoDays.has(d)) tags.unshift("📷");
     return `<button class="hrow" data-date="${d}">
       <span class="d">${dateLabel(d)}</span>
       <span class="score ${SKIN_CLASS[e.skin] || "none"}">${e.skin ? SKIN[e.skin - 1] : "–"}</span>
@@ -594,8 +514,6 @@ function reportHtml(r) {
     ${counts(w.skin_detail_days) ? `<p class="areas">肌の状態: ${counts(w.skin_detail_days)}</p>` : ""}
 
     ${card("今週のまとめ", `<p>${esc(ai.summary)}</p>`)}
-    ${r.photos?.this && ai.photo_note ? card("写真から分かること", `<p>${esc(ai.photo_note)}</p>`,
-      { note: r.photos.prev ? `${md(r.photos.prev)}と${md(r.photos.this)}を比較` : `${md(r.photos.this)}撮影` }) : ""}
     ${ai.see_doctor ? `<section class="card warn"><h2>皮膚科の受診をおすすめします</h2><p>${esc(ai.see_doctor)}</p></section>` : ""}
     ${card("悪化の原因の候補", list(ai.suspects, (s) => `<li><div class="rhead"><b>${esc(s.factor)}</b>
       <span class="conf ${esc(s.confidence)}">${CONF[s.confidence] || ""}</span></div><p>${esc(s.evidence)}</p></li>`))}
@@ -672,9 +590,6 @@ async function renderSettings() {
     <section><h2>データ</h2>
       <p>記録とレポートをすべて JSON ファイルで保存します（バックアップ用）。</p>
       <a class="btn ghost" href="/api/export" download>データを書き出す</a></section>
-    <section><h2>顔写真</h2>
-      <p>保存した写真をすべて削除します。記録とレポートの文章は残ります。</p>
-      <button class="btn ghost danger" id="delete-photos">写真をすべて削除</button></section>
     <section><h2>この端末</h2><button class="btn ghost" id="logout">ログアウト</button></section>
   </div>`;
   const status = await pushStatus();
@@ -714,11 +629,6 @@ main.addEventListener("click", async (e) => {
     if (!name || items[kind].includes(name)) return;
     if (name.length > 30) return alert("30文字以内で入力してください");
     items[kind].push(name);
-  } else if (e.target.id === "delete-photos") {
-    if (!confirm("写真をすべて削除します。元に戻せません。よろしいですか？")) return;
-    const r = await api("/api/photos", { method: "DELETE" }).catch(() => null);
-    reportCache = null;
-    return alert(r ? `${r.deleted}枚の写真を削除しました` : "削除できませんでした");
   } else if (e.target.id === "logout") {
     await api("/api/logout", { method: "POST" }).catch(() => {});
     return renderLogin();
@@ -776,7 +686,6 @@ async function start() {
     $("#tabs").hidden = false;
     updateTabs();
     if (tab !== "record") await selectTab(tab);
-    if (fromHash === "photo") $("#photo-card")?.scrollIntoView({ block: "center" }); // 写真の日の通知から
   })());
 }
 

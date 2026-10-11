@@ -10,11 +10,5 @@ VAPID_PUBLIC_KEY = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "skin-log"
-# Cloudflare で D1 を作成したら、その Database ID を貼る (README の手順2)
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "8af24177-365e-4438-8e17-2b9027ffbd77"
 migrations_dir = "migrations"
-
-# 顔写真の保存先 (deploy.yml が初回に作成する)
-[[r2_buckets]]
-binding = "PHOTOS"
-bucket_name = "skin-log-photos"

@@ -36,7 +36,6 @@ def today():
 
 
 entries = sample.entries(today())
-photos = {}  # date -> (uploaded_at, bytes)
 products = {p["id"]: p for p in sample.products(today())}
 CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め", "ひげ剃りフォーム",
               "アフターシェーブ", "シャンプー", "コンディショナー", "整髪料", "ボディソープ", "洗濯洗剤", "柔軟剤",
@@ -65,16 +64,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_bytes(self, data, ctype):
-        self.send_response(200)
-        self.send_header("content-type", ctype)
-        self.send_header("content-length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def raw_body(self):
-        return self.rfile.read(int(self.headers.get("content-length") or 0))
-
     def body(self):
         n = int(self.headers.get("content-length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
@@ -101,11 +90,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             for k in sorted(before, reverse=True):
                 for c in entries[k].get("changes") or []:
                     last.setdefault(c["kind"], k)
-            ph = lambda k: {"date": k, "uploaded_at": photos[k][0]}
-            prev_ph = max((k for k in photos if k < d), default=None)
             return self.send_json({"today": t, "date": d, "entry": entries.get(d),
-                                   "photo": ph(d) if d in photos else None,
-                                   "prev_photo": ph(prev_ph) if prev_ph else None,
                                    "prev": {"date": p, "entry": entries[p]} if p else None,
                                    "last_changes": last,
                                    "products": [{k: x[k] for k in ("id", "name", "category", "care_item")}
@@ -117,21 +102,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         if route == "GET /api/history":
             return self.send_json({"today": t, "entries": [{"date": d, "entry": e}
-                                                          for d, e in sorted(entries.items(), reverse=True)],
-                                   "photos": sorted(photos)})
-        if route == "GET /api/photo":
-            if q.get("date") not in photos:
-                return self.send_json({"error": "not found"}, 404)
-            return self.send_bytes(photos[q["date"]][1], "image/jpeg")
-        if route == "PUT /api/photo":
-            data = self.raw_body()
-            if data[:3] != b"\xff\xd8\xff":
-                return self.send_json({"error": "jpeg only"}, 400)
-            photos[q["date"]] = (dt.datetime.now(JST).isoformat(), data)
-            return self.send_json({"ok": True, "photo": {"date": q["date"], "uploaded_at": photos[q["date"]][0]}})
-        if route == "DELETE /api/photo":
-            photos.pop(q.get("date"), None)
-            return self.send_json({"ok": True})
+                                                          for d, e in sorted(entries.items(), reverse=True)]})
         if route == "GET /api/products":
             return self.send_json({"products": sorted(products.values(), key=lambda x: x.get("started") or "",
                                                       reverse=True), "categories": CATEGORIES})
@@ -165,10 +136,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if b.get("research"):
                 x.update(status="pending", mode="search")
             return self.send_json({"ok": True, "product": x})
-        if route == "DELETE /api/photos":
-            n = len(photos)
-            photos.clear()
-            return self.send_json({"ok": True, "deleted": n})
         if route == "GET /api/reports":
             ids = sorted(reports, reverse=True)
             rid = q.get("id") or (ids[0] if ids else None)
@@ -179,7 +146,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         if route == "GET /api/export":
             return self.send_json({"items": ITEMS, "entries": [{"date": d, "entry": e} for d, e in sorted(entries.items())],
-                                   "reports": list(reports.values())})
+                                   "reports": list(reports.values()), "products": list(products.values())})
         return self.send_json({"error": "not found"}, 404)
 
     def do_GET(self):

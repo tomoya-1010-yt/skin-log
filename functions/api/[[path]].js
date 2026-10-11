@@ -5,8 +5,6 @@
 const DAY = 24 * 60 * 60 * 1000;
 const COOKIE = "skin_session";
 const COOKIE_MAX_AGE = 400 * 24 * 3600; // ブラウザが許す最長 (約13か月)
-const PHOTO_MAX_BYTES = 5 * 1024 * 1024; // 端末側で縮小してから送るので通常は 300KB 前後
-const photoKey = (date) => `photos/${date}.jpg`;
 
 // 化粧品・日用品の種類。替えたときに記録する「変えたこと」の種類を決める
 const PRODUCT_CATEGORIES = ["洗顔", "クレンジング", "化粧水", "美容液", "乳液", "保湿クリーム", "日焼け止め",
@@ -102,9 +100,6 @@ async function state(env, url) {
     .bind(date).all()).results;
   for (const r of changed)
     for (const c of JSON.parse(r.body).changes || []) last_changes[c.kind] ??= r.date;
-  const photo = await env.DB.prepare("SELECT date, uploaded_at FROM photos WHERE date = ?").bind(date).first();
-  const prevPhoto = await env.DB.prepare("SELECT date, uploaded_at FROM photos WHERE date < ? ORDER BY date DESC LIMIT 1")
-    .bind(date).first();
   // この日に使っていた製品 (記録タブに表示する)
   const products = (await allProducts(env))
     .filter((x) => (!x.started || x.started <= date) && (!x.ended || x.ended >= date))
@@ -112,7 +107,7 @@ async function state(env, url) {
   return json({
     today, date,
     entry: await entryOf(env, date),
-    photo, prev_photo: prevPhoto, products,
+    products,
     prev: prev ? { date: prev.date, entry: JSON.parse(prev.body) } : null,
     last_changes,
     items: await items(env),
@@ -136,51 +131,7 @@ async function history(env, url) {
   const since = jstDate(Date.now() - days * DAY);
   const rows = (await env.DB.prepare("SELECT date, body FROM entries WHERE date >= ? ORDER BY date DESC")
     .bind(since).all()).results;
-  const photos = (await env.DB.prepare("SELECT date FROM photos WHERE date >= ?").bind(since).all()).results;
-  return json({
-    today: jstDate(),
-    entries: rows.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
-    photos: photos.map((r) => r.date),
-  });
-}
-
-// ---------- 顔写真 ----------
-
-async function getPhoto(env, date) {
-  const obj = isDate(date) ? await env.PHOTOS.get(photoKey(date)) : null;
-  if (!obj) return json({ error: "not found" }, { status: 404 });
-  return new Response(obj.body, {
-    headers: { "content-type": "image/jpeg", "cache-control": "private, max-age=86400" },
-  });
-}
-
-async function putPhoto(env, request, url) {
-  const date = url.searchParams.get("date");
-  if (!isDate(date) || date > jstDate()) return json({ error: "bad date" }, { status: 400 });
-  const body = await request.arrayBuffer();
-  const head = new Uint8Array(body.slice(0, 3));
-  if (head[0] !== 0xff || head[1] !== 0xd8 || head[2] !== 0xff) return json({ error: "jpeg only" }, { status: 400 });
-  if (body.byteLength > PHOTO_MAX_BYTES) return json({ error: "too large" }, { status: 413 });
-  await env.PHOTOS.put(photoKey(date), body, { httpMetadata: { contentType: "image/jpeg" } });
-  const uploaded_at = new Date().toISOString();
-  await env.DB.prepare("INSERT OR REPLACE INTO photos (date, uploaded_at, size) VALUES (?, ?, ?)")
-    .bind(date, uploaded_at, body.byteLength).run();
-  return json({ ok: true, photo: { date, uploaded_at } });
-}
-
-async function deletePhoto(env, url) {
-  const date = url.searchParams.get("date");
-  if (!isDate(date)) return json({ error: "bad date" }, { status: 400 });
-  await env.PHOTOS.delete(photoKey(date));
-  await env.DB.prepare("DELETE FROM photos WHERE date = ?").bind(date).run();
-  return json({ ok: true });
-}
-
-async function deleteAllPhotos(env) {
-  const dates = (await env.DB.prepare("SELECT date FROM photos").all()).results.map((r) => r.date);
-  for (let i = 0; i < dates.length; i += 500) await env.PHOTOS.delete(dates.slice(i, i + 500).map(photoKey));
-  await env.DB.prepare("DELETE FROM photos").run();
-  return json({ ok: true, deleted: dates.length });
+  return json({ today: jstDate(), entries: rows.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })) });
 }
 
 async function reports(env, url) {
@@ -300,10 +251,8 @@ async function deleteProduct(env, id) {
 async function exportAll(env) {
   const entries = (await env.DB.prepare("SELECT date, body FROM entries ORDER BY date").all()).results;
   const reps = (await env.DB.prepare("SELECT id, body FROM reports ORDER BY id").all()).results;
-  const photos = (await env.DB.prepare("SELECT date FROM photos ORDER BY date").all()).results;
   return json({
     exported_at: new Date().toISOString(),
-    photos: photos.map((r) => r.date), // 画像そのものは含まない
     items: await items(env),
     products: await allProducts(env),
     entries: entries.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
@@ -317,12 +266,10 @@ async function internalEntries(env, url) {
   const since = url.searchParams.get("since") || "0000-00-00";
   const rows = (await env.DB.prepare("SELECT date, body FROM entries WHERE date >= ? ORDER BY date")
     .bind(since).all()).results;
-  const photos = (await env.DB.prepare("SELECT date FROM photos WHERE date >= ? ORDER BY date").bind(since).all()).results;
   return json({
     today: jstDate(),
     items: await items(env),
     entries: rows.map((r) => ({ date: r.date, entry: JSON.parse(r.body) })),
-    photos: photos.map((r) => r.date),
   });
 }
 
@@ -382,7 +329,6 @@ export async function onRequest({ request, env }) {
     if (route === "GET /api/internal/entries") return internalEntries(env, url);
     if (route === "GET /api/internal/reports") return internalReports(env);
     if (route === "PUT /api/internal/report") return putReport(env, request);
-    if (route === "GET /api/internal/photo") return getPhoto(env, url.searchParams.get("date"));
     if (route === "GET /api/internal/products") return internalProducts(env, url);
     const pr = path.match(/^\/api\/internal\/products\/([\w-]+)$/);
     if (pr && request.method === "PUT") return putProductResult(env, request, pr[1]);
@@ -402,10 +348,6 @@ export async function onRequest({ request, env }) {
   if (route === "PUT /api/items") return putItems(env, request);
   if (route === "POST /api/subscribe") return subscribe(env, request);
   if (route === "GET /api/export") return exportAll(env);
-  if (route === "GET /api/photo") return getPhoto(env, url.searchParams.get("date"));
-  if (route === "PUT /api/photo") return putPhoto(env, request, url);
-  if (route === "DELETE /api/photo") return deletePhoto(env, url);
-  if (route === "DELETE /api/photos") return deleteAllPhotos(env);
   if (route === "GET /api/products") return json({ products: await allProducts(env), categories: PRODUCT_CATEGORIES });
   if (route === "POST /api/products") return createProduct(env, request);
   const pm = path.match(/^\/api\/products\/([\w-]+)$/);

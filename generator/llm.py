@@ -5,7 +5,6 @@ Claude Code の CLI (claude -p) を使う。GitHub Actions では CLAUDE_CODE_OA
 """
 import json
 import os
-import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -28,15 +27,12 @@ def _tool_result_text(block):
     return ""
 
 
-def _claude(prompt, schema, effort="high", files=None, tools=None, max_turns=None, with_tool_texts=False, system=SYSTEM):
+def _claude(prompt, schema, effort="high", tools="", max_turns=3, with_tool_texts=False, system=SYSTEM):
     """claude -p を実行し、JSON Schema に沿った結果を返す。
 
-    files ({ファイル名: bytes}) を渡すと作業フォルダに置き、Read ツールでだけ読めるようにする (顔写真用)。
     tools にツール名 (例: "WebSearch,WebFetch") を渡すとそれだけ使わせる。
     with_tool_texts=True なら (結果, ツール結果のテキスト一覧) を返す (検索結果に出た URL か確かめる用)。
     """
-    if tools is None:
-        tools = "Read" if files else ""
     exe = shutil.which("claude")
     if not exe:
         raise RuntimeError("claude コマンドが見つかりません。Claude Code をインストールしてください")
@@ -48,15 +44,13 @@ def _claude(prompt, schema, effort="high", files=None, tools=None, max_turns=Non
         "--system-prompt", system,
         "--tools", tools,
         "--permission-mode", "dontAsk", "--permission-prompts", "none",
-        "--max-turns", str(max_turns or (6 if files else 3)),
+        "--max-turns", str(max_turns),
         "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config",
     ]
     if tools:
         cmd += ["--allowedTools", tools]
     # 空のフォルダで動かし、リポジトリの設定やファイルを読ませない
     with tempfile.TemporaryDirectory() as cwd:
-        for name, data in (files or {}).items():
-            (pathlib.Path(cwd) / name).write_bytes(data)
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                               encoding="utf-8", cwd=cwd, timeout=900)
     result, tool_texts = None, []
@@ -209,13 +203,12 @@ REPORT_SCHEMA = {
             "properties": {"action": {"type": "string"}, "how_to_check": {"type": "string"}},
             "required": ["action", "how_to_check"], "additionalProperties": False},
         "see_doctor": {"type": "string"},
-        "photo_note": {"type": "string"},
         "ingredient_findings": {"type": "array", "items": {
             "type": "object",
             "properties": {"finding": {"type": "string"}, "reason": {"type": "string"}},
             "required": ["finding", "reason"], "additionalProperties": False}},
     },
-    "required": ["summary", "suspects", "good", "actions", "experiment", "see_doctor", "photo_note",
+    "required": ["summary", "suspects", "good", "actions", "experiment", "see_doctor",
                  "ingredient_findings"],
     "additionalProperties": False,
 }
@@ -257,19 +250,6 @@ def _change_lines(changes, since):
     return ("\n".join(lines) or "(直近60日に記録なし)") + f"\n種類ごとの最後の記録: {last}"
 
 
-def _photo_section(photos):
-    if not photos:
-        return "(写真なし)", "- photo_note: 写真がないので空文字。"
-    names = "\n".join(f"- {name} ({d} 撮影)" for name, d in photos)
-    rule = """- photo_note: 作業フォルダの写真を Read ツールで開いて見たうえで、2〜3文で書く。
-  - 2枚あるときは、ニキビ (数・場所・赤く腫れているか)、赤み、乾燥・テカリの見た目の変化を比べる。
-    1枚だけのときは今の様子を書き、次回から比べられると添える。
-  - 明るさ・角度・距離が違って比べにくいときは、そのことを正直に書き、撮り方のコツを1つ添える。
-  - 写真で見える範囲のことだけを書き、診断や病名、肌以外の見た目への言及はしない。
-  - 写真から分かったことが記録と食い違う場合や、原因の候補の裏付けになる場合は、suspects や summary にも反映してよい。"""
-    return names, rule
-
-
 def _product_lines(products):
     if not products:
         return "(登録なし)"
@@ -286,11 +266,10 @@ def _product_lines(products):
     return "\n".join(lines)
 
 
-def report(date, period, this_week, prev_week, assoc, records, data_days, last_report, changes, since, photos=None,
+def report(date, period, this_week, prev_week, assoc, records, data_days, last_report, changes, since,
            products=None, product_assoc=None):
-    """photos: [(ファイル名, 撮影日, bytes)] 古い順。products: 登録した製品。product_assoc: 製品・成分ごとの集計。"""
+    """products: 登録した製品。product_assoc: 製品・成分ごとの集計。"""
     product_assoc = product_assoc or {"worse": [], "better": []}
-    photo_names, photo_rule = _photo_section([(n, d) for n, d, _ in photos or []])
     acne_areas = "、".join(f"{stats.ACNE_AREAS.get(k, k)} {n}個"
                           for k, n in sorted(this_week["acne_by_area"].items(), key=lambda x: -x[1])) or "なし"
     last = "(前回のレポートなし)"
@@ -335,9 +314,6 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
 ## 前回のレポートで提案したこと
 {last}
 
-## 顔写真
-{photo_names}
-
 ## 書き方
 - summary: 対象週の肌の様子と前週との違いを2〜3文で。前回の提案を実行できたか記録から読み取れれば触れる。
 - suspects: 悪化の原因の候補を最大4つ、可能性の高い順に。
@@ -364,7 +340,6 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
 - see_doctor: 強いかゆみが何日も続く、ニキビが増え続けている、膿のニキビが何日も続く、
   腫れ・痛み・出血・広い範囲の湿疹がメモにある
   などのときだけ、受診をすすめる理由を1〜2文で。当てはまらなければ空文字。
-{photo_rule}
 - ingredient_findings: 製品の成分から考えられることを最大3つ。製品が未登録・成分が未確認なら空。
   - 「変えたことの前後比較」や「製品・成分と悪化の関係」で悪化と重なる製品があれば、その製品の注意成分を挙げて関係を説明する
     (例: 化粧水Bに替えてから赤みが増えた。Bには前の化粧水になかったエタノールと香料が入っている)。
@@ -377,4 +352,4 @@ def report(date, period, this_week, prev_week, assoc, records, data_days, last_r
 - 記録が少ない場合は、その分だけ断定を避けて短く書く。
 - 文体は「です・ます」。1項目は長くても60字程度。専門用語は避ける。
 """
-    return _claude(prompt, REPORT_SCHEMA, files={n: b for n, _, b in photos or []})
+    return _claude(prompt, REPORT_SCHEMA)

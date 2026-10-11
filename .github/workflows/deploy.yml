@@ -26,8 +26,6 @@ jobs:
           node-version: 22
       - name: Pages プロジェクトを用意 (初回のみ作成)
         run: npx --yes wrangler@4 pages project create skin-log --production-branch=main || true
-      - name: 写真の保存先を用意 (初回のみ作成)
-        run: npx --yes wrangler@4 r2 bucket create skin-log-photos || true
       - name: DB のテーブルを更新
         run: npx --yes wrangler@4 d1 migrations apply skin-log --remote
       - name: 合言葉と連携用トークンを登録

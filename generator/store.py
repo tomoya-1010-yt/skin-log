@@ -26,22 +26,6 @@ class Store:
     def entries(self, since):
         return self._req("GET", "/entries", params={"since": since})
 
-    def photo(self, date):
-        res = requests.get(self.base + "/photo", params={"date": date}, headers=self.headers, timeout=60)
-        res.raise_for_status()
-        return res.content
-
-    def products(self, status=None):
-        return self._req("GET", "/products", params={"status": status} if status else None)
-
-    def put_product_result(self, product_id, result):
-        """利用者が調査中に製品を書き換えていたら False を返す (結果は捨てる)。"""
-        res = requests.put(f"{self.base}/products/{product_id}", json=result, headers=self.headers, timeout=30)
-        if res.status_code in (404, 409):
-            return False
-        res.raise_for_status()
-        return True
-
     def reports(self):
         return self._req("GET", "/reports")
 
